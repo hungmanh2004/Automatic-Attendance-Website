@@ -36,6 +36,13 @@ import time
 from face_recognize import get_db_connection, get_embedding, recognize_face, recognize_faces_batch
 
 # ============================================================
+# [MỚI v6] Import module căn chỉnh khuôn mặt
+# Giải quyết: Mặt nghiêng → vector sai → "Khong xac dinh"
+# Giải pháp: Xoay thẳng mặt bằng YOLOv12 Keypoints trước khi embed
+# ============================================================
+from face_alignment import align_face
+
+# ============================================================
 # [MỚI v4] Import module ghi nhận điểm danh
 # Chức năng: Tự động ghi CSV + đẩy Google Sheets khi nhận diện
 # ============================================================
@@ -44,7 +51,7 @@ from attendance_logger import AttendanceLogger
 # ============================================================
 # CẤU HÌNH - Điều chỉnh tùy máy
 # ============================================================
-FRAME_SKIP = 10               # Chỉ nhận diện mỗi 10 khung hình (~0.3 giây ở 30fps)
+FRAME_SKIP = 6                # Chỉ nhận diện mỗi 6 khung hình (~0.2 giây ở 30fps)
 CONFIDENCE_THRESHOLD = 0.5    # Độ tin cậy tối thiểu của YOLOv12 khi phát hiện mặt
 DISTANCE_THRESHOLD = 0.35     # Ngưỡng cosine distance cho nhận diện (query DB)
 
@@ -70,15 +77,19 @@ def draw_label(frame, x1, y1, x2, y2, label, known=True):
 
     # Tính kích thước text để vẽ nền phía sau
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.7
+    font_scale = 0.6
     thickness = 2
     (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, thickness)
 
+    # 1. Tính toán tọa độ x để căn giữa text so với bounding box
+    box_width = x2 - x1
+    text_x = x1 + (box_width - text_w) // 2
+
     # Vẽ hình chữ nhật nền cho text (ngay dưới bounding box)
-    cv2.rectangle(frame, (x1, y2), (x1 + text_w + 4, y2 + text_h + baseline + 4), color, -1)
+    cv2.rectangle(frame, (text_x, y2), (text_x + text_w, y2 + text_h + baseline + 4), color, -1)
 
     # Vẽ text tên người (màu trắng trên nền màu)
-    cv2.putText(frame, label, (x1 + 2, y2 + text_h + 2), font, font_scale, (255, 255, 255), thickness)
+    cv2.putText(frame, label, (text_x, y2 + text_h + 2), font, font_scale, (255, 255, 255), thickness)
 
 
 # ============================================================
@@ -115,6 +126,13 @@ def detect_and_recognize(frame, conn, yolo_model):
     # YOLOv12 trả về list, lấy phần tử đầu tiên (ứng với 1 ảnh đầu vào)
     boxes = detections[0].boxes
 
+    # ============================================================
+    # [MỚI v6] Lấy keypoints từ YOLOv12 (5 điểm mốc: 2 mắt, mũi, 2 mép)
+    # Dùng để xác định góc nghiêng của khuôn mặt và xoay thẳng lại.
+    # Nếu model không hỗ trợ keypoints → kps = None → fallback crop thô
+    # ============================================================
+    kps = getattr(detections[0], 'keypoints', None)
+
     # Nếu không phát hiện khuôn mặt nào
     if boxes is None or len(boxes) == 0:
         return results
@@ -135,8 +153,14 @@ def detect_and_recognize(frame, conn, yolo_model):
         # Lấy tọa độ bounding box [x1, y1, x2, y2]
         x1, y1, x2, y2 = boxes.xyxy[i].cpu().numpy().astype(int)
 
-        # Crop khuôn mặt ra khỏi khung hình
-        face_crop = frame[y1:y2, x1:x2]
+        # ============================================================
+        # [MỚI v6] Căn chỉnh khuôn mặt (Face Alignment)
+        # Thay vì crop thô frame[y1:y2, x1:x2], ta xoay thẳng mặt
+        # dựa trên vị trí 2 mắt từ YOLOv12 Keypoints.
+        # Nếu không có keypoints → align_face tự fallback về crop thô.
+        # ============================================================
+        kp = kps.xy[i].cpu().numpy() if kps is not None else None
+        face_crop = align_face(frame, kp, (x1, y1, x2, y2))
 
         if face_crop.size == 0:
             continue

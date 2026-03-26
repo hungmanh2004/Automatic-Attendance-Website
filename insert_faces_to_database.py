@@ -3,9 +3,14 @@
 # ============================================================
 # Chức năng:
 #   1. Đọc ảnh nhân viên từ thư mục employees/
-#   2. Phát hiện và crop khuôn mặt (RetinaFace)
+#   2. Phát hiện và crop khuôn mặt (YOLOv12-face + Alignment)
 #   3. Trích xuất embedding 512 chiều (ArcFace) - tái sử dụng từ face_recognize.py
 #   4. Lưu vào PostgreSQL (pgvector)
+#
+# [MỚI v6] Đổi từ RetinaFace sang YOLOv12-face + Face Alignment
+# Lý do: Đồng bộ cùng chuẩn xử lý ảnh với webcam.py
+#        → Vector trong DB cùng "hệ quy chiếu" với vector webcam
+#        → Matching chính xác hơn nhiều!
 #
 # Sử dụng:
 #   python insert_faces_to_database.py "employees/Le Xuan Dai.jpg"
@@ -15,27 +20,33 @@
 import sys
 import os
 import cv2
-from retinaface import RetinaFace
+from ultralytics import YOLO
 
 # Tái sử dụng hàm đã có sẵn thay vì viết lại
 from face_recognize import get_db_connection, get_embedding
+from face_alignment import align_face
 
 # ============================================================
 # CẤU HÌNH
 # ============================================================
 STORED_FACES_FOLDER = "stored-faces"
-FACE_CONFIDENCE_THRESHOLD = 0.8  # Chỉ lấy khuôn mặt có độ chắc chắn > 80%
+FACE_CONFIDENCE_THRESHOLD = 0.5  # Đồng bộ với webcam.py
+YOLO_FACE_MODEL = "yolov12n-face.pt"  # Cùng model với webcam.py
 
 
-def detect_and_crop_face(img_path):
+def detect_and_crop_face(img_path, yolo_model):
     """
-    Đọc ảnh, phát hiện khuôn mặt, crop và lưu vào thư mục stored-faces/.
+    Đọc ảnh, phát hiện khuôn mặt bằng YOLOv12, căn chỉnh và lưu.
+
+    [MỚI v6] Dùng YOLOv12-face + Face Alignment thay RetinaFace.
+    Đảm bảo ảnh mẫu trong DB dùng cùng chuẩn xử lý với webcam live.
 
     Args:
-        img_path: Đường dẫn tới ảnh nhân viên gốc.
+        img_path:   Đường dẫn tới ảnh nhân viên gốc.
+        yolo_model: Model YOLO đã load sẵn.
 
     Returns:
-        str:  Đường dẫn tới file ảnh đã crop (trong stored-faces/).
+        str:  Đường dẫn tới file ảnh đã align (trong stored-faces/).
         None: Nếu không tìm thấy khuôn mặt hoặc ảnh bị lỗi.
     """
     img = cv2.imread(img_path)
@@ -45,41 +56,47 @@ def detect_and_crop_face(img_path):
 
     os.makedirs(STORED_FACES_FOLDER, exist_ok=True)
 
-    # RetinaFace trả về dict nếu tìm thấy mặt, tuple rỗng nếu không
-    faces = RetinaFace.detect_faces(img)
-    if not isinstance(faces, dict):
+    # Dùng YOLOv12-face (cùng model với webcam.py)
+    detections = yolo_model(img, verbose=False)
+    boxes = detections[0].boxes
+    kps = getattr(detections[0], 'keypoints', None)
+
+    if boxes is None or len(boxes) == 0:
         print("❌ Không tìm thấy khuôn mặt nào trong ảnh.")
         return None
 
     filename = os.path.basename(img_path)
 
-    for key, face_info in faces.items():
-        score = face_info["score"]
-        if score < FACE_CONFIDENCE_THRESHOLD:
+    for i in range(len(boxes)):
+        conf = float(boxes.conf[i])
+        if conf < FACE_CONFIDENCE_THRESHOLD:
             continue
 
-        # RetinaFace trả về [x1, y1, x2, y2]
-        x1, y1, x2, y2 = face_info["facial_area"]
-        cropped_image = img[y1:y2, x1:x2]
+        # Lấy bounding box
+        x1, y1, x2, y2 = boxes.xyxy[i].cpu().numpy().astype(int)
 
-        if cropped_image.size == 0:
+        # [MỚI v6] Dùng Face Alignment thay vì crop thô
+        kp = kps.xy[i].cpu().numpy() if kps is not None else None
+        aligned_face = align_face(img, kp, (x1, y1, x2, y2))
+
+        if aligned_face.size == 0:
             continue
 
         target_path = os.path.join(STORED_FACES_FOLDER, filename)
-        cv2.imwrite(target_path, cropped_image)
-        print(f"  Đã crop và lưu khuôn mặt: {target_path}")
+        cv2.imwrite(target_path, aligned_face)
+        print(f"  Đã căn chỉnh và lưu khuôn mặt: {target_path}")
         return target_path  # Lấy khuôn mặt đầu tiên đủ tin cậy
 
-    print("❌ Không có khuôn mặt nào đủ độ tin cậy (>80%).")
+    print("❌ Không có khuôn mặt nào đủ độ tin cậy.")
     return None
 
 
 def insert_face_to_db(cropped_img_path):
     """
-    Trích xuất embedding từ ảnh đã crop và lưu vào Database.
+    Trích xuất embedding từ ảnh đã căn chỉnh và lưu vào Database.
 
     Args:
-        cropped_img_path: Đường dẫn tới ảnh khuôn mặt đã crop.
+        cropped_img_path: Đường dẫn tới ảnh khuôn mặt đã align.
     """
     filename = os.path.basename(cropped_img_path)
     person_name = os.path.splitext(filename)[0]
@@ -89,7 +106,6 @@ def insert_face_to_db(cropped_img_path):
 
     try:
         # Tái sử dụng get_embedding() từ face_recognize.py
-        # (không cần viết lại DeepFace.represent thủ công)
         embedding = get_embedding(cropped_img_path)
 
         cur.execute("INSERT INTO pictures VALUES (%s, %s)", (person_name, embedding))
@@ -105,10 +121,7 @@ def insert_face_to_db(cropped_img_path):
 def main():
     """Điểm vào chính - đọc đường dẫn từ argument hoặc hỏi user."""
     # Nhận đường dẫn ảnh từ command line hoặc hỏi trực tiếp
-    if len(sys.argv) > 1:
-        img_path = sys.argv[1]
-    else:
-        img_path = input("Nhập đường dẫn ảnh nhân viên: ").strip()
+    img_path = "employees/Jungkook.jpg"
 
     if not os.path.exists(img_path):
         print(f"❌ Không tìm thấy file: {img_path}")
@@ -119,9 +132,13 @@ def main():
         count = len(os.listdir(STORED_FACES_FOLDER))
         print(f"Trong database đang có {count} khuôn mặt.")
 
-    # Bước 1: Phát hiện và crop khuôn mặt
-    print(f"\n[1/2] Đang phát hiện khuôn mặt trong ảnh...")
-    cropped_path = detect_and_crop_face(img_path)
+    # Load model YOLOv12-face (cùng model với webcam.py)
+    print(f"Đang tải model {YOLO_FACE_MODEL}...")
+    yolo_model = YOLO(YOLO_FACE_MODEL)
+
+    # Bước 1: Phát hiện, căn chỉnh và lưu khuôn mặt
+    print(f"\n[1/2] Đang phát hiện và căn chỉnh khuôn mặt...")
+    cropped_path = detect_and_crop_face(img_path, yolo_model)
     if cropped_path is None:
         return
 
