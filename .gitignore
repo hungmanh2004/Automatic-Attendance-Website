@@ -1,0 +1,9 @@
+.env
+credentials.json
+/stored-faces
+/__pycache__
+/attendance_logs
+/employees
+/face-test
+/.brain
+/plans
