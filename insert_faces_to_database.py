@@ -1,103 +1,138 @@
-import cv2
+# ============================================================
+# insert_faces_to_database.py - Thêm nhân viên mới vào Database
+# ============================================================
+# Chức năng:
+#   1. Đọc ảnh nhân viên từ thư mục employees/
+#   2. Phát hiện và crop khuôn mặt (RetinaFace)
+#   3. Trích xuất embedding 512 chiều (ArcFace) - tái sử dụng từ face_recognize.py
+#   4. Lưu vào PostgreSQL (pgvector)
+#
+# Sử dụng:
+#   python insert_faces_to_database.py "employees/Le Xuan Dai.jpg"
+#   python insert_faces_to_database.py  (sẽ hỏi đường dẫn)
+# ============================================================
+
+import sys
 import os
+import cv2
 from retinaface import RetinaFace
-from dotenv import load_dotenv
 
-load_dotenv()
+# Tái sử dụng hàm đã có sẵn thay vì viết lại
+from face_recognize import get_db_connection, get_embedding
 
-## Thêm ảnh mới vào danh sách nhân viên ##
-
-# Ảnh mới
-path = "employees/Le Xuan Dai.jpg"
-filename = os.path.basename(path)
-
-# Đọc ảnh
-img = cv2.imread(path)
-# Kiểm tra nếu không đọc được ảnh
-if img is None:
-    print(f"Không thể đọc ảnh từ {path}")
-    exit()
-
-# Tạo thư mục chứa ảnh nếu chưa có
-os.makedirs('stored-faces', exist_ok=True)
-
-# Tìm kiếm khuôn mặt
-# Trả về một dictionary chứa thông tin các khuôn mặt (tọa độ, điểm mốc, độ tin cậy)
-faces = RetinaFace.detect_faces(img)
+# ============================================================
+# CẤU HÌNH
+# ============================================================
+STORED_FACES_FOLDER = "stored-faces"
+FACE_CONFIDENCE_THRESHOLD = 0.8  # Chỉ lấy khuôn mặt có độ chắc chắn > 80%
 
 
+def detect_and_crop_face(img_path):
+    """
+    Đọc ảnh, phát hiện khuôn mặt, crop và lưu vào thư mục stored-faces/.
 
-# Số nhân viên hiện có trong database
-count = len(os.listdir('stored-faces'))
-        
-print(f"Trong database đang có {count} khuôn mặt.")
+    Args:
+        img_path: Đường dẫn tới ảnh nhân viên gốc.
 
-# Nếu không tìm thấy mặt, RetinaFace có thể trả về tuple rỗng, nên cần kiểm tra type là dict
-if isinstance(faces, dict):
-    # Duyệt qua các khuôn mặt tìm thấy
+    Returns:
+        str:  Đường dẫn tới file ảnh đã crop (trong stored-faces/).
+        None: Nếu không tìm thấy khuôn mặt hoặc ảnh bị lỗi.
+    """
+    img = cv2.imread(img_path)
+    if img is None:
+        print(f"❌ Không thể đọc ảnh từ {img_path}")
+        return None
+
+    os.makedirs(STORED_FACES_FOLDER, exist_ok=True)
+
+    # RetinaFace trả về dict nếu tìm thấy mặt, tuple rỗng nếu không
+    faces = RetinaFace.detect_faces(img)
+    if not isinstance(faces, dict):
+        print("❌ Không tìm thấy khuôn mặt nào trong ảnh.")
+        return None
+
+    filename = os.path.basename(img_path)
+
     for key, face_info in faces.items():
-        # Lấy độ tin cậy (score) để lọc các khuôn mặt bị nhận diện nhầm (tuỳ chọn)
         score = face_info["score"]
-        if score < 0.8: # Chỉ lấy các khuôn mặt có độ chắc chắn > 80%
+        if score < FACE_CONFIDENCE_THRESHOLD:
             continue
-            
-        # Lấy tọa độ khuôn mặt
-        # Lưu ý: RetinaFace trả về [x1, y1, x2, y2] thay vì [x, y, w, h] như Haar Cascade
+
+        # RetinaFace trả về [x1, y1, x2, y2]
         x1, y1, x2, y2 = face_info["facial_area"]
-        
-        # Crop ảnh để lấy mỗi mặt (Y trước, X sau)
         cropped_image = img[y1:y2, x1:x2]
-        
-        # Kiểm tra xem ảnh crop có bị lỗi kích thước không
+
         if cropped_image.size == 0:
             continue
-            
-        # Lưu ảnh
-        target_file_name = os.path.join('stored-faces', filename)
-        cv2.imwrite(target_file_name, cropped_image)
-        count += 1
-        
-    print(f"Đã lưu thành công. Trong database từ giờ sẽ có {count} khuôn mặt.")
-else:
-    print("Không tìm thấy khuôn mặt nào trong ảnh.")
-    
 
-# importing the required libraries
-import numpy as np
-from deepface import DeepFace
-import psycopg2
+        target_path = os.path.join(STORED_FACES_FOLDER, filename)
+        cv2.imwrite(target_path, cropped_image)
+        print(f"  Đã crop và lưu khuôn mặt: {target_path}")
+        return target_path  # Lấy khuôn mặt đầu tiên đủ tin cậy
 
-# connecting to the database
-conn = psycopg2.connect(os.getenv("AIVEN_PATH"))
-cur = conn.cursor()
+    print("❌ Không có khuôn mặt nào đủ độ tin cậy (>80%).")
+    return None
 
-folder_path = "stored-faces"
 
-img_path = os.path.join(folder_path, filename)
+def insert_face_to_db(cropped_img_path):
+    """
+    Trích xuất embedding từ ảnh đã crop và lưu vào Database.
 
-# Lấy tên người từ file (Henry Cavill)
-person_name = os.path.splitext(filename)[0]
+    Args:
+        cropped_img_path: Đường dẫn tới ảnh khuôn mặt đã crop.
+    """
+    filename = os.path.basename(cropped_img_path)
+    person_name = os.path.splitext(filename)[0]
 
-try:
-    # Trích xuất embedding sử dụng mô hình ArcFace
-    # Trả về một list các dict, ta lấy embedding của khuôn mặt đầu tiên [0]
-    # enforce_detection=False vì ảnh đã được crop sẵn từ trước
-    embedding_objs = DeepFace.represent(
-        img_path=img_path, 
-        model_name="ArcFace",
-        enforce_detection=False
-    )
-        
-    # Lấy vector (list gồm 512 chiều đối với ArcFace)
-    embedding = embedding_objs[0]["embedding"]
-        
-    # Lưu vào Database
-    cur.execute("INSERT INTO pictures VALUES (%s, %s)", (person_name, embedding))
-    print(f"Đã tạo vector thành công cho: {filename}")
-        
-except Exception as e:
-    print(f"Lỗi khi xử lý {filename}: {e}")
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-conn.commit()
-cur.close()
-conn.close()
+    try:
+        # Tái sử dụng get_embedding() từ face_recognize.py
+        # (không cần viết lại DeepFace.represent thủ công)
+        embedding = get_embedding(cropped_img_path)
+
+        cur.execute("INSERT INTO pictures VALUES (%s, %s)", (person_name, embedding))
+        conn.commit()
+        print(f"  ✅ Đã thêm '{person_name}' vào Database thành công!")
+    except Exception as e:
+        print(f"  ❌ Lỗi khi xử lý {filename}: {e}")
+    finally:
+        cur.close()
+        conn.close()
+
+
+def main():
+    """Điểm vào chính - đọc đường dẫn từ argument hoặc hỏi user."""
+    # Nhận đường dẫn ảnh từ command line hoặc hỏi trực tiếp
+    if len(sys.argv) > 1:
+        img_path = sys.argv[1]
+    else:
+        img_path = input("Nhập đường dẫn ảnh nhân viên: ").strip()
+
+    if not os.path.exists(img_path):
+        print(f"❌ Không tìm thấy file: {img_path}")
+        return
+
+    # Hiển thị số khuôn mặt hiện có
+    if os.path.exists(STORED_FACES_FOLDER):
+        count = len(os.listdir(STORED_FACES_FOLDER))
+        print(f"Trong database đang có {count} khuôn mặt.")
+
+    # Bước 1: Phát hiện và crop khuôn mặt
+    print(f"\n[1/2] Đang phát hiện khuôn mặt trong ảnh...")
+    cropped_path = detect_and_crop_face(img_path)
+    if cropped_path is None:
+        return
+
+    # Bước 2: Tạo embedding và lưu vào DB
+    print(f"[2/2] Đang tạo embedding và lưu vào Database...")
+    insert_face_to_db(cropped_path)
+
+    # Hiển thị số khuôn mặt sau khi thêm
+    count = len(os.listdir(STORED_FACES_FOLDER))
+    print(f"\nTrong database từ giờ sẽ có {count} khuôn mặt.")
+
+
+if __name__ == "__main__":
+    main()

@@ -4,26 +4,27 @@
 # Luồng hoạt động:
 #   1. Mở camera → đọc từng khung hình (MAIN THREAD - luôn mượt)
 #   2. Cứ mỗi N khung hình, gửi ảnh sang BACKGROUND THREAD
-#   3. Background thread chạy YOLOv8-face + DeepFace + query DB
+#   3. Background thread chạy YOLOv12-face + DeepFace + query DB
 #   4. Khi có kết quả → cập nhật lại cho main thread vẽ lên màn hình
 #   5. Main thread luôn vẽ bounding box từ kết quả mới nhất
 #
-# [NÂNG CẤP v3] Thay RetinaFace bằng YOLOv8-face (nhanh gấp 3-5x)
+# [NÂNG CẤP v3] Thay RetinaFace bằng YOLOv12-face (nhanh gấp 3-5x)
 #                Thêm Warm-up Model (giảm trễ lần đầu từ 30s → 0s)
 # Nhấn 'q' để thoát.
 # ============================================================
 
 import cv2
 import numpy as np
+import psycopg2
 
 # ============================================================
-# [MỚI v3] Thay RetinaFace bằng YOLOv8-face
-# Giải thích: YOLOv8 nhẹ hơn RetinaFace rất nhiều trên CPU.
+# [MỚI v3] Thay RetinaFace bằng YOLOv12-face
+# Giải thích: YOLOv12 nhẹ hơn RetinaFace rất nhiều trên CPU.
 #   - RetinaFace: ~200-500ms/frame trên CPU → camera giật
 #   - YOLOv12-face nano: ~50-100ms/frame trên CPU → mượt hơn 3-5 lần
 #
-# Cài đặt: pip install yolov8-face
-# Thư viện này tự động tải model yolov8n-face.pt khi chạy lần đầu.
+# Cài đặt: pip install ultralytics
+# Model yolov12n-face.pt sẽ được tải tự động khi chạy lần đầu.
 # ============================================================
 from ultralytics import YOLO
 
@@ -32,7 +33,7 @@ import threading
 import time
 
 # Import các hàm đã tách từ face_recognize.py
-from face_recognize import get_db_connection, get_embedding, recognize_face
+from face_recognize import get_db_connection, get_embedding, recognize_face, recognize_faces_batch
 
 # ============================================================
 # [MỚI v4] Import module ghi nhận điểm danh
@@ -81,10 +82,10 @@ def draw_label(frame, x1, y1, x2, y2, label, known=True):
 
 
 # ============================================================
-# [MỚI v3] detect_and_recognize() - Dùng YOLOv8-face thay RetinaFace
+# [MỚI v3] detect_and_recognize() - Dùng YOLOv12-face thay RetinaFace
 # Giải thích sự khác biệt:
 #   - RetinaFace trả về dict: {"face_1": {"facial_area": [x1,y1,x2,y2], ...}}
-#   - YOLOv8 trả về list results, mỗi result chứa .boxes với:
+#   - YOLOv12 trả về list results, mỗi result chứa .boxes với:
 #       .xyxy  → tọa độ [x1, y1, x2, y2]
 #       .conf  → độ tin cậy (0.0 - 1.0)
 # ============================================================
@@ -92,6 +93,11 @@ def detect_and_recognize(frame, conn, yolo_model):
     """
     Phát hiện và nhận diện tất cả khuôn mặt trong 1 khung hình.
     Chạy ở background thread để không block camera.
+
+    [MỚI v5] Kiến trúc 2 pha:
+      Pha 1: YOLO phát hiện mặt → ArcFace trích embedding cho TẤT CẢ mặt
+      Pha 2: Gửi TẤT CẢ embedding lên DB 1 lần duy nhất (batch query)
+      → Giảm từ N lần gọi DB xuống còn 1 lần khi thấy N người!
 
     Args:
         frame:      Khung hình numpy array (BGR).
@@ -101,19 +107,25 @@ def detect_and_recognize(frame, conn, yolo_model):
     results = []
 
     # ============================================================
-    # Bước 1: Dùng YOLOv8-face phát hiện khuôn mặt
+    # Bước 1: Dùng YOLOv12-face phát hiện khuôn mặt
     # verbose=False để không in log mỗi lần chạy (giữ terminal sạch)
     # ============================================================
     detections = yolo_model(frame, verbose=False)
 
-    # YOLOv8 trả về list, lấy phần tử đầu tiên (ứng với 1 ảnh đầu vào)
+    # YOLOv12 trả về list, lấy phần tử đầu tiên (ứng với 1 ảnh đầu vào)
     boxes = detections[0].boxes
 
     # Nếu không phát hiện khuôn mặt nào
     if boxes is None or len(boxes) == 0:
         return results
 
-    # Bước 2: Duyệt qua từng khuôn mặt đã phát hiện
+    # ============================================================
+    # PHA 1: Thu thập tất cả bounding box + embedding
+    # Mỗi khuôn mặt sẽ được crop → trích embedding bằng ArcFace.
+    # Những mặt không trích được embedding → đánh dấu "Khong xac dinh".
+    # ============================================================
+    face_data = []  # List dict {"box": tuple, "embedding": list | None}
+
     for i in range(len(boxes)):
         # Lấy độ tin cậy
         conf = float(boxes.conf[i])
@@ -129,39 +141,61 @@ def detect_and_recognize(frame, conn, yolo_model):
         if face_crop.size == 0:
             continue
 
-        # Bước 3: Trích xuất embedding bằng ArcFace (qua DeepFace)
+        # Trích xuất embedding bằng ArcFace (qua DeepFace)
         try:
             embedding = get_embedding(face_crop)
+            face_data.append({"box": (x1, y1, x2, y2), "embedding": embedding})
         except Exception:
+            # ArcFace không nhận ra mặt → đánh dấu luôn, không cần hỏi DB
             results.append({
                 "box": (x1, y1, x2, y2),
                 "name": "Khong xac dinh",
                 "known": False
             })
-            continue
 
-        # Bước 4: So khớp với database
-        try:
-            matches = recognize_face(embedding, conn, threshold=DISTANCE_THRESHOLD, top_k=1)
-        except Exception:
+    # Nếu không có embedding nào hợp lệ → trả kết quả sớm
+    if not face_data:
+        return results
+
+    # ============================================================
+    # PHA 2: Batch Query - Gửi TẤT CẢ embedding lên DB 1 LẦN
+    # ============================================================
+    # [MỚI v5] Cho lỗi kết nối DB lan ra ngoài (KHÔNG nuốt)
+    # Lý do: Nếu except Exception bắt hết, Worker sẽ không biết
+    #        DB đã đứt → AI "mù" vĩnh viễn mà không báo lỗi.
+    #        Bây giờ lỗi DB sẽ truyền lên _worker_loop để tự reconnect.
+    # ============================================================
+    embeddings = [fd["embedding"] for fd in face_data]
+
+    try:
+        batch_results = recognize_faces_batch(
+            embeddings, conn, threshold=DISTANCE_THRESHOLD, top_k=1
+        )
+    except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        raise  # Để lỗi DB lan ra → Worker sẽ tự reconnect
+    except Exception:
+        # Lỗi khác (SQL syntax, etc.) → đánh dấu tất cả là unknown
+        for fd in face_data:
             results.append({
-                "box": (x1, y1, x2, y2),
+                "box": fd["box"],
                 "name": "Khong xac dinh",
                 "known": False
             })
-            continue
+        return results
 
-        # Bước 5: Xác định kết quả
+    # Bước 3: Ghép kết quả DB với bounding box
+    for i, fd in enumerate(face_data):
+        matches = batch_results[i]
         if matches:
             name, distance = matches[0]
             results.append({
-                "box": (x1, y1, x2, y2),
+                "box": fd["box"],
                 "name": f"{name}",
                 "known": True
             })
         else:
             results.append({
-                "box": (x1, y1, x2, y2),
+                "box": fd["box"],
                 "name": "Khong xac dinh",
                 "known": False
             })
@@ -181,6 +215,7 @@ class RecognitionWorker:
         self._frame = None
         self._lock = threading.Lock()
         self._stop = False
+        self._reconnect_attempts = 0  # [MỚI v5] Đếm số lần thử kết nối lại DB
 
         self._thread = threading.Thread(target=self._worker_loop, daemon=True)
         self._thread.start()
@@ -201,6 +236,50 @@ class RecognitionWorker:
         self._stop = True
         self._thread.join(timeout=3)
 
+    # ============================================================
+    # [MỚI v5] _try_reconnect() - Tự động kết nối lại Database
+    # ============================================================
+    # Giải thích:
+    #   Khi mạng chập chờn, kết nối tới Aiven Cloud sẽ đứt.
+    #   Thay vì để AI "mù" vĩnh viễn, hàm này sẽ:
+    #   1. Đóng kết nối cũ (đã chết)
+    #   2. Tạo kết nối mới
+    #   3. Nếu thất bại → đợi lâu dần (2s, 4s, 8s) rồi thử lại
+    #   4. Sau 3 lần liên tiếp thất bại → tạm dừng 10s rồi thử vòng mới
+    # ============================================================
+    def _try_reconnect(self):
+        """Thử kết nối lại Database khi bị đứt. Trả về True nếu thành công."""
+        MAX_ATTEMPTS = 3
+        self._reconnect_attempts += 1
+
+        if self._reconnect_attempts > MAX_ATTEMPTS:
+            print(f"[RecognitionWorker] ❌ Đã thử kết nối lại {MAX_ATTEMPTS} lần liên tiếp thất bại.")
+            print("[RecognitionWorker]    Nhận diện tạm dừng. Sẽ thử lại sau 10 giây...")
+            time.sleep(10)
+            self._reconnect_attempts = 0  # Reset để thử lại vòng mới
+            return False
+
+        wait_seconds = 2 ** self._reconnect_attempts  # Exponential backoff: 2s, 4s, 8s
+        print(f"[RecognitionWorker] ⚠️ Mất kết nối Database! Đang thử kết nối lại... "
+              f"(lần {self._reconnect_attempts}/{MAX_ATTEMPTS}, đợi {wait_seconds}s)")
+
+        time.sleep(wait_seconds)
+
+        try:
+            # Đóng kết nối cũ (nếu chưa đóng)
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+
+            self.conn = get_db_connection()
+            self._reconnect_attempts = 0
+            print("[RecognitionWorker] ✅ Đã kết nối lại Database thành công!")
+            return True
+        except Exception as e:
+            print(f"[RecognitionWorker] ❌ Kết nối lại thất bại: {e}")
+            return False
+
     def _worker_loop(self):
         """Vòng lặp chạy liên tục ở luồng nền."""
         while not self._stop:
@@ -213,8 +292,24 @@ class RecognitionWorker:
                     self.is_busy = True
 
             if frame_to_process is not None:
-                # [MỚI v3] Truyền yolo_model vào hàm detect
-                new_results = detect_and_recognize(frame_to_process, self.conn, self.yolo_model)
+                try:
+                    # [MỚI v3] Truyền yolo_model vào hàm detect
+                    new_results = detect_and_recognize(frame_to_process, self.conn, self.yolo_model)
+                    self._reconnect_attempts = 0  # Query thành công → reset bộ đếm
+                except (psycopg2.OperationalError, psycopg2.InterfaceError):
+                    # ============================================================
+                    # [MỚI v5] Auto-Reconnect khi DB bị đứt
+                    # Thay vì "mù" vĩnh viễn, Worker sẽ tự cấp cứu đường truyền.
+                    # ============================================================
+                    new_results = []
+                    if self._try_reconnect():
+                        # Kết nối lại thành công → thử nhận diện lại frame này
+                        try:
+                            new_results = detect_and_recognize(
+                                frame_to_process, self.conn, self.yolo_model
+                            )
+                        except Exception:
+                            pass  # Nếu vẫn lỗi → bỏ frame này, đợi frame sau
 
                 with self._lock:
                     self.results = new_results
@@ -262,7 +357,7 @@ def warm_up_models(yolo_model):
 # ============================================================
 def main():
     # ============================================================
-    # [MỚI v3] Load model YOLOv8-face MỘT LẦN DUY NHẤT ở đây
+    # [MỚI v3] Load model YOLOv12-face MỘT LẦN DUY NHẤT ở đây
     # Trước đây code cũ gọi YOLO("...") bên trong hàm detect mỗi frame
     # → Load model lại mỗi lần → cực kỳ lãng phí và chậm!
     # ============================================================
@@ -339,7 +434,18 @@ def main():
     logger.shutdown()  # [MỚI v4] Đợi Google Sheets ghi xong rồi mới thoát
     cap.release()
     cv2.destroyAllWindows()
-    conn.close()
+
+    # ============================================================
+    # [MỚI v5] Đóng kết nối DB an toàn
+    # Lý do đóng cả 2: Nếu Worker đã tự reconnect, conn gốc và
+    # worker.conn là 2 đối tượng khác nhau, cần đóng cả hai.
+    # ============================================================
+    for c in (conn, worker.conn):
+        try:
+            if not c.closed:
+                c.close()
+        except Exception:
+            pass
     print("Đã đóng Camera và Database.")
 
 
