@@ -112,7 +112,8 @@ def recognize_face(embedding, conn, threshold=0.35, top_k=1):
     for row in rows:
         filename = row[0]     # Cột đầu tiên: tên người
         distance = row[-1]    # Cột cuối cùng: cosine distance
-        results.append((filename, distance))
+        new_name = filename.rsplit(' ', 1)[0]
+        results.append((new_name, distance))
     
     return results
 
@@ -205,9 +206,14 @@ def recognize_faces_batch(embeddings, conn, threshold=0.35, top_k=1):
         idx = row[0]          # Index ứng với embedding nào
         person_name = row[1]  # Tên người
         distance = row[2]     # Cosine distance
+        
+        # [MỚI] Cắt bỏ phần số và khoảng trắng ở đuôi (vd: "Daniel 1" -> "Daniel")
+        # Giúp nhận diện từ camera chung quy về 1 người dù DB có nhiều ảnh các góc khác nhau
+        new_name = person_name.rsplit(' ', 1)[0]
+        
         if idx not in results_by_idx:
             results_by_idx[idx] = []
-        results_by_idx[idx].append((person_name, distance))
+        results_by_idx[idx].append((new_name, distance))
 
     # Trả về list đúng thứ tự đầu vào, embedding nào không khớp → []
     return [results_by_idx.get(i, []) for i in range(len(embeddings))]

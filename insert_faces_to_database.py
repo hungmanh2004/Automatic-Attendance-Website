@@ -91,17 +91,17 @@ def detect_and_crop_face(img_path, yolo_model):
     return None
 
 
-def insert_face_to_db(cropped_img_path):
+def insert_face_to_db(cropped_img_path, conn):
     """
     Trích xuất embedding từ ảnh đã căn chỉnh và lưu vào Database.
 
     Args:
         cropped_img_path: Đường dẫn tới ảnh khuôn mặt đã align.
+        conn: Kết nối psycopg2 đã được thiết lập sẵn.
     """
     filename = os.path.basename(cropped_img_path)
     person_name = os.path.splitext(filename)[0]
 
-    conn = get_db_connection()
     cur = conn.cursor()
 
     try:
@@ -113,18 +113,21 @@ def insert_face_to_db(cropped_img_path):
         print(f"  ✅ Đã thêm '{person_name}' vào Database thành công!")
     except Exception as e:
         print(f"  ❌ Lỗi khi xử lý {filename}: {e}")
+        # Có thể thêm cờ báo xóa ảnh rác (nếu cần) ở đây!
     finally:
         cur.close()
-        conn.close()
 
 
 def main():
     """Điểm vào chính - đọc đường dẫn từ argument hoặc hỏi user."""
     # Nhận đường dẫn ảnh từ command line hoặc hỏi trực tiếp
-    img_path = "employees/Jungkook.jpg"
+    if len(sys.argv) > 1:
+        folder_path = sys.argv[1]
+    else:
+        folder_path = input("Nhập đường dẫn thư mục ảnh nhân viên (vd: employees/Tran Manh Hung): ").strip()
 
-    if not os.path.exists(img_path):
-        print(f"❌ Không tìm thấy file: {img_path}")
+    if not os.path.exists(folder_path):
+        print(f"❌ Không tìm thấy thư mục: {folder_path}")
         return
 
     # Hiển thị số khuôn mặt hiện có
@@ -132,23 +135,37 @@ def main():
         count = len(os.listdir(STORED_FACES_FOLDER))
         print(f"Trong database đang có {count} khuôn mặt.")
 
-    # Load model YOLOv12-face (cùng model với webcam.py)
+    # Load model YOLOv12-face (chỉ load 1 lần TRƯỚC VÒNG LẶP)
     print(f"Đang tải model {YOLO_FACE_MODEL}...")
     yolo_model = YOLO(YOLO_FACE_MODEL)
+    
+    # Kết nối DB (chỉ tạo kết nối 1 lần TRƯỚC VÒNG LẶP)
+    print("Đang kết nối Database...")
+    conn = get_db_connection()
 
-    # Bước 1: Phát hiện, căn chỉnh và lưu khuôn mặt
-    print(f"\n[1/2] Đang phát hiện và căn chỉnh khuôn mặt...")
-    cropped_path = detect_and_crop_face(img_path, yolo_model)
-    if cropped_path is None:
-        return
+    for filename in os.listdir(folder_path):
+        # Bỏ qua các file ẩn/khác ảnh (.DS_Store...)
+        if filename.startswith('.'):
+            continue
+            
+        img_path = os.path.join(folder_path, filename)
+        print(f"\n--- Đang xử lý: {filename} ---")
 
-    # Bước 2: Tạo embedding và lưu vào DB
-    print(f"[2/2] Đang tạo embedding và lưu vào Database...")
-    insert_face_to_db(cropped_path)
+        # Bước 1: Phát hiện, căn chỉnh và lưu khuôn mặt
+        print(f"[1/2] Đang phát hiện và căn chỉnh khuôn mặt...")
+        cropped_path = detect_and_crop_face(img_path, yolo_model)
+        if cropped_path is None:
+            continue  # Bỏ qua nếu lỗi, tiếp tục với ảnh khác
+
+        # Bước 2: Tạo embedding và lưu vào DB
+        print(f"[2/2] Đang tạo embedding và lưu vào Database...")
+        insert_face_to_db(cropped_path, conn)
+        
+    conn.close()
 
     # Hiển thị số khuôn mặt sau khi thêm
     count = len(os.listdir(STORED_FACES_FOLDER))
-    print(f"\nTrong database từ giờ sẽ có {count} khuôn mặt.")
+    print(f"\n✅ Hoàn tất! Trong database từ giờ sẽ có {count} khuôn mặt.")
 
 
 if __name__ == "__main__":
