@@ -1,6 +1,9 @@
+import mimetypes
 import json
+from datetime import datetime
+from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, send_file, url_for
 from sqlalchemy.exc import IntegrityError
 
 from ..extensions import db
@@ -30,11 +33,33 @@ def _employee_not_found():
     return jsonify({"status": "employee_not_found"}), 404
 
 
+def _attendance_not_found():
+    return jsonify({"status": "attendance_not_found"}), 404
+
+
+def _snapshot_not_found():
+    return jsonify({"status": "snapshot_not_found"}), 404
+
+
 def _normalize_text(value):
     if value is None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _parse_date(value, field_name):
+    if value is None:
+        return None, None
+
+    normalized = _normalize_text(value)
+    if not normalized:
+        return None, _invalid_request(f"{field_name} must be YYYY-MM-DD")
+
+    try:
+        return datetime.strptime(normalized, "%Y-%m-%d").date(), None
+    except ValueError:
+        return None, _invalid_request(f"{field_name} must be YYYY-MM-DD")
 
 
 def _get_employee(employee_id):
@@ -265,3 +290,78 @@ def manager_employee_face_samples_delete(employee_id):
     _get_service("face_index_service").refresh()
 
     return jsonify({"employee_id": employee.id, "deleted_count": deleted_count})
+
+
+@manager_bp.get("/manager/attendance")
+def manager_attendance():
+    _, error_response = require_manager()
+    if error_response is not None:
+        return error_response
+
+    from_date, error_response = _parse_date(request.args.get("from"), "from")
+    if error_response is not None:
+        return error_response
+
+    to_date, error_response = _parse_date(request.args.get("to"), "to")
+    if error_response is not None:
+        return error_response
+
+    if from_date is None and to_date is None:
+        from_date = to_date = datetime.now().date()
+    elif from_date is None:
+        from_date = to_date
+    elif to_date is None:
+        to_date = from_date
+
+    if from_date > to_date:
+        return _invalid_request("from must be less than or equal to to")
+
+    search = _normalize_text(request.args.get("search"))
+    attendance_service = _get_service("attendance_service")
+    rows = attendance_service.list_attendance_events(from_date=from_date, to_date=to_date, search=search)
+
+    records = []
+    for event, employee in rows:
+        records.append(
+            {
+                "id": event.id,
+                "employee_id": event.employee_id,
+                "employee_code": employee.employee_code,
+                "full_name": employee.full_name,
+                "checked_in_at": event.checked_in_at.isoformat(),
+                "snapshot_url": url_for("manager.manager_attendance_snapshot", attendance_id=event.id),
+            }
+        )
+
+    return jsonify(
+        {
+            "filters": {
+                "from": from_date.isoformat(),
+                "to": to_date.isoformat(),
+                "search": search or "",
+            },
+            "summary": {
+                "total_records": len(records),
+            },
+            "records": records,
+        }
+    )
+
+
+@manager_bp.get("/manager/attendance/<int:attendance_id>/snapshot")
+def manager_attendance_snapshot(attendance_id):
+    _, error_response = require_manager()
+    if error_response is not None:
+        return error_response
+
+    attendance_service = _get_service("attendance_service")
+    attendance_event = attendance_service.get_attendance_event(attendance_id)
+    if attendance_event is None:
+        return _attendance_not_found()
+
+    snapshot_path = Path(attendance_event.snapshot_path)
+    if not snapshot_path.exists():
+        return _snapshot_not_found()
+
+    mime_type = mimetypes.guess_type(snapshot_path.name)[0] or "application/octet-stream"
+    return send_file(snapshot_path, mimetype=mime_type)

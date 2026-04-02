@@ -1,9 +1,10 @@
 from datetime import datetime
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, or_
 
 from ..extensions import db
-from ..models import AttendanceEvent
+from ..models import AttendanceEvent, Employee
 
 
 def _find_existing_event(employee_id, checkin_date):
@@ -39,3 +40,29 @@ class AttendanceService:
                 return existing_event, False
             raise
         return event, True
+
+    def list_attendance_events(self, from_date=None, to_date=None, search=None):
+        query = (
+            db.session.query(AttendanceEvent, Employee)
+            .join(Employee, AttendanceEvent.employee_id == Employee.id)
+        )
+
+        if from_date is not None:
+            query = query.filter(AttendanceEvent.checkin_date >= from_date.isoformat())
+        if to_date is not None:
+            query = query.filter(AttendanceEvent.checkin_date <= to_date.isoformat())
+
+        normalized_search = (search or "").strip()
+        if normalized_search:
+            pattern = f"%{normalized_search.lower()}%"
+            query = query.filter(
+                or_(
+                    func.lower(Employee.employee_code).like(pattern),
+                    func.lower(Employee.full_name).like(pattern),
+                )
+            )
+
+        return query.order_by(AttendanceEvent.checked_in_at.desc(), AttendanceEvent.id.desc()).all()
+
+    def get_attendance_event(self, attendance_id):
+        return db.session.get(AttendanceEvent, attendance_id)
