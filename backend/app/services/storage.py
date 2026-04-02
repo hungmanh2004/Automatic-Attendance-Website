@@ -12,7 +12,7 @@ class StorageService:
         if not suffix:
             suffix = ".bin"
 
-        date_dir = self.checkin_dir / datetime.utcnow().date().isoformat()
+        date_dir = self.checkin_dir / datetime.now().date().isoformat()
         snapshot_path = date_dir / f"{uuid4().hex}{suffix}"
         snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         snapshot_path.write_bytes(frame_bytes)

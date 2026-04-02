@@ -1,3 +1,6 @@
+from pathlib import Path
+
+
 class RecognitionService:
     def __init__(self, storage_service, embedding_service, face_index_service, attendance_service):
         self.storage_service = storage_service
@@ -24,6 +27,8 @@ class RecognitionService:
             snapshot_path=snapshot_path,
             distance=match["distance"],
         )
+        if not created:
+            _cleanup_orphan_snapshot(snapshot_path, event.snapshot_path)
 
         return {
             "status": "recognized" if created else "already_checked_in",
@@ -34,3 +39,12 @@ class RecognitionService:
             "checked_in_at": event.checked_in_at.isoformat(),
             "snapshot_path": event.snapshot_path,
         }
+
+
+def _cleanup_orphan_snapshot(snapshot_path, persisted_snapshot_path):
+    snapshot_path = Path(snapshot_path)
+    persisted_snapshot_path = Path(persisted_snapshot_path)
+    if snapshot_path == persisted_snapshot_path:
+        return
+
+    snapshot_path.unlink(missing_ok=True)

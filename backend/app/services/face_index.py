@@ -35,8 +35,7 @@ class FaceIndexService:
             )
 
     def find_match(self, embedding):
-        if not self._entries:
-            self.refresh()
+        self.refresh()
 
         query_embedding = [float(value) for value in embedding]
         best_match = None
