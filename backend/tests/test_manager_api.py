@@ -1,3 +1,4 @@
+from backend.app import create_app
 from werkzeug.security import generate_password_hash
 
 
@@ -58,6 +59,29 @@ def test_manager_login_rejects_invalid_credentials(app, client):
 
     assert response.status_code == 401
     assert response.get_json()["status"] == "invalid_credentials"
+
+
+def test_manager_login_accepts_configured_secret_override(tmp_path):
+    data_dir = tmp_path / "override-data"
+    app = create_app(
+        {
+            "TESTING": True,
+            "SECRET_KEY": "override-secret",
+            "APP_DB_PATH": data_dir / "app.db",
+            "CHECKIN_DIR": data_dir / "checkins",
+            "FACES_DIR": data_dir / "faces",
+        }
+    )
+    client = app.test_client()
+    manager = _create_manager(app)
+
+    response = client.post(
+        "/api/manager/login",
+        json={"username": manager["username"], "password": manager["password"]},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["manager"]["username"] == manager["username"]
 
 
 def test_manager_login_sets_session_and_allows_me_lookup(app, client):
@@ -157,6 +181,25 @@ def test_manager_create_employee_rejects_duplicate_employee_code(app, client):
     assert response.get_json()["status"] == "duplicate_employee_code"
 
 
+def test_manager_create_employee_duplicate_full_name_is_not_labeled_as_duplicate_code(app, client):
+    manager = _create_manager(app)
+    _create_employee(app, employee_code="EMP-100", full_name="Ada Lovelace")
+
+    login_response = client.post(
+        "/api/manager/login",
+        json={"username": manager["username"], "password": manager["password"]},
+    )
+    assert login_response.status_code == 200
+
+    response = client.post(
+        "/api/manager/employees",
+        json={"employee_code": "EMP-101", "full_name": "Ada Lovelace"},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["status"] != "duplicate_employee_code"
+
+
 def test_manager_create_employee_persists_employee(app, client):
     manager = _create_manager(app)
 
@@ -180,3 +223,21 @@ def test_manager_create_employee_persists_employee(app, client):
     with app.app_context():
         employee = Employee.query.filter_by(employee_code="EMP-200").one()
         assert employee.full_name == "Grace Hopper"
+
+
+def test_manager_create_employee_rejects_whitespace_only_values(app, client):
+    manager = _create_manager(app)
+
+    login_response = client.post(
+        "/api/manager/login",
+        json={"username": manager["username"], "password": manager["password"]},
+    )
+    assert login_response.status_code == 200
+
+    response = client.post(
+        "/api/manager/employees",
+        json={"employee_code": "   ", "full_name": "\t"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["status"] == "invalid_request"

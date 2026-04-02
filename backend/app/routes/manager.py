@@ -24,11 +24,18 @@ def _unauthorized():
     return jsonify({"status": "unauthorized"}), 401
 
 
+def _normalize_text(value):
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
 @manager_bp.post("/manager/login")
 def manager_login():
     payload = request.get_json(silent=True) or {}
-    username = payload.get("username")
-    password = payload.get("password")
+    username = _normalize_text(payload.get("username"))
+    password = _normalize_text(payload.get("password"))
     if not username or not password:
         return _invalid_request("username and password are required")
 
@@ -51,7 +58,7 @@ def manager_me():
 
 @manager_bp.get("/manager/employees")
 def manager_employees():
-    manager, error_response = require_manager()
+    _, error_response = require_manager()
     if error_response is not None:
         return error_response
 
@@ -60,13 +67,13 @@ def manager_employees():
 
 @manager_bp.post("/manager/employees")
 def manager_create_employee():
-    manager, error_response = require_manager()
+    _, error_response = require_manager()
     if error_response is not None:
         return error_response
 
     payload = request.get_json(silent=True) or {}
-    employee_code = payload.get("employee_code")
-    full_name = payload.get("full_name")
+    employee_code = _normalize_text(payload.get("employee_code"))
+    full_name = _normalize_text(payload.get("full_name"))
     if not employee_code or not full_name:
         return _invalid_request("employee_code and full_name are required")
 
@@ -80,6 +87,14 @@ def manager_create_employee():
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
-        return jsonify({"status": "duplicate_employee_code"}), 409
+        code_conflict = Employee.query.filter_by(employee_code=employee_code).first()
+        if code_conflict is not None:
+            return jsonify({"status": "duplicate_employee_code"}), 409
+
+        name_conflict = Employee.query.filter_by(full_name=full_name).first()
+        if name_conflict is not None:
+            return jsonify({"status": "duplicate_employee_conflict"}), 409
+
+        return jsonify({"status": "employee_conflict"}), 409
 
     return jsonify({"employee": serialize_employee(employee)}), 201
