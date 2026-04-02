@@ -1,11 +1,12 @@
-from backend.app import create_app
 from werkzeug.security import generate_password_hash
 
 
 try:
+    from backend.app import create_app
     from backend.app.extensions import db
     from backend.app.models import Employee, ManagerUser
 except ModuleNotFoundError:
+    from app import create_app
     from app.extensions import db
     from app.models import Employee, ManagerUser
 
@@ -181,7 +182,7 @@ def test_manager_create_employee_rejects_duplicate_employee_code(app, client):
     assert response.get_json()["status"] == "duplicate_employee_code"
 
 
-def test_manager_create_employee_duplicate_full_name_is_not_labeled_as_duplicate_code(app, client):
+def test_manager_create_employee_allows_duplicate_full_name_when_code_differs(app, client):
     manager = _create_manager(app)
     _create_employee(app, employee_code="EMP-100", full_name="Ada Lovelace")
 
@@ -196,8 +197,8 @@ def test_manager_create_employee_duplicate_full_name_is_not_labeled_as_duplicate
         json={"employee_code": "EMP-101", "full_name": "Ada Lovelace"},
     )
 
-    assert response.status_code == 409
-    assert response.get_json()["status"] != "duplicate_employee_code"
+    assert response.status_code == 201
+    assert response.get_json()["employee"]["employee_code"] == "EMP-101"
 
 
 def test_manager_create_employee_persists_employee(app, client):

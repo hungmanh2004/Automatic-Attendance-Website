@@ -90,11 +90,6 @@ def manager_create_employee():
         code_conflict = Employee.query.filter_by(employee_code=employee_code).first()
         if code_conflict is not None:
             return jsonify({"status": "duplicate_employee_code"}), 409
-
-        name_conflict = Employee.query.filter_by(full_name=full_name).first()
-        if name_conflict is not None:
-            return jsonify({"status": "duplicate_employee_conflict"}), 409
-
-        return jsonify({"status": "employee_conflict"}), 409
+        raise
 
     return jsonify({"employee": serialize_employee(employee)}), 201

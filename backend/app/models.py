@@ -17,7 +17,7 @@ class Employee(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     employee_code = db.Column(db.String(64), unique=True, nullable=False, index=True)
-    full_name = db.Column(db.String(255), unique=True, nullable=False)
+    full_name = db.Column(db.String(255), nullable=False)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(
