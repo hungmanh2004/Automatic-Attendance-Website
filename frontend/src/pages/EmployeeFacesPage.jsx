@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { deleteFaceSamples, enrollFaceSamples, getFaceSamples } from "../lib/api";
+import { getFriendlyErrorMessage } from "../lib/errorMessages";
 import { useManagerAuth } from "../context/ManagerAuthContext";
 
 export function EmployeeFacesPage() {
@@ -69,7 +70,7 @@ export function EmployeeFacesPage() {
         navigate("/manager/login", { replace: true });
         return;
       }
-      setMessage(error.payload?.status || error.message || "Failed to enroll faces");
+      setMessage(getFriendlyErrorMessage(error, "Could not enroll faces. Please try again."));
     } finally {
       setSubmitting(false);
     }
@@ -89,7 +90,7 @@ export function EmployeeFacesPage() {
         navigate("/manager/login", { replace: true });
         return;
       }
-      setMessage(error.message || "Failed to delete face registration");
+      setMessage(getFriendlyErrorMessage(error, "Could not delete face registration. Please try again."));
     } finally {
       setDeleting(false);
     }

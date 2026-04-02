@@ -25,6 +25,12 @@ describe("Manager login", () => {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ employees: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
       );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -62,6 +68,23 @@ describe("Manager login", () => {
     await user.type(screen.getByLabelText(/password/i), "wrong");
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/invalid_credentials/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/incorrect username or password/i);
+  });
+
+  it("does not show an auth error on the first visit to the login page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ status: "unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    renderApp("/manager/login");
+
+    expect(await screen.findByRole("heading", { name: /sign in to manage employees/i })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

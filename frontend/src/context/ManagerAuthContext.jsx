@@ -22,6 +22,8 @@ export function ManagerAuthProvider({ children }) {
     let active = true;
 
     async function bootstrap() {
+      setStatus("loading");
+      setError(null);
       try {
         const response = await getCurrentManager();
         if (!active) {
@@ -35,7 +37,11 @@ export function ManagerAuthProvider({ children }) {
         }
         setManager(null);
         setStatus("unauthenticated");
-        setError(caughtError);
+        if (caughtError?.status && caughtError.status !== 401) {
+          setError(caughtError);
+        } else {
+          setError(null);
+        }
       }
     }
 
@@ -44,7 +50,7 @@ export function ManagerAuthProvider({ children }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [location.pathname]);
 
   async function signIn(username, password) {
     setError(null);

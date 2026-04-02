@@ -78,6 +78,6 @@ describe("Employee roster", () => {
     await user.type(screen.getByLabelText(/full name/i), "Ada");
     await user.click(screen.getByRole("button", { name: /create employee/i }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/duplicate_employee_code/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/already in use/i);
   });
 });

@@ -1,9 +1,21 @@
 async function parseResponse(response) {
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : null;
+  let payload = null;
+
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { rawBody: text };
+    }
+  }
 
   if (!response.ok) {
-    const error = new Error(payload?.message || payload?.status || "Request failed");
+    const message =
+      (payload && typeof payload === "object" && payload.message) ||
+      (payload && typeof payload === "object" && payload.rawBody) ||
+      `Request failed with status ${response.status}`;
+    const error = new Error(message);
     error.status = response.status;
     error.payload = payload;
     throw error;

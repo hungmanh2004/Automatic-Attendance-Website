@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { createEmployee, getEmployees } from "../lib/api";
+import { getFriendlyErrorMessage } from "../lib/errorMessages";
 import { useManagerAuth } from "../context/ManagerAuthContext";
 
 export function EmployeeListPage() {
@@ -55,7 +56,7 @@ export function EmployeeListPage() {
         navigate("/manager/login", { replace: true });
         return;
       }
-      setMessage(error.payload?.status || error.message || "Failed to create employee");
+      setMessage(getFriendlyErrorMessage(error, "Could not create employee. Please try again."));
     } finally {
       setSubmitting(false);
     }
@@ -96,7 +97,10 @@ export function EmployeeListPage() {
             </div>
           )}
           {message && (
-            <p className={message.includes("successfully") ? "status" : "status error"} role={message.includes("successfully") ? undefined : "alert"}>
+            <p
+              className={message.includes("successfully") ? "status" : "status error"}
+              role={message.includes("successfully") ? undefined : "alert"}
+            >
               {message}
             </p>
           )}

@@ -37,4 +37,36 @@ describe("App routes", () => {
 
     await user.click(screen.getByRole("button", { name: /sign in/i }));
   });
+
+  it("restores an existing manager session when entering manager routes from a public page", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ manager: { id: 1, username: "manager" } }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ manager: { id: 1, username: "manager" } }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ employees: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+    );
+
+    renderApp("/");
+
+    await user.click(screen.getByRole("link", { name: /manager/i }));
+
+    expect(await screen.findByText(/roster management/i)).toBeInTheDocument();
+  });
 });
