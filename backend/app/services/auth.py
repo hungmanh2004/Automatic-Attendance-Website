@@ -20,6 +20,7 @@ def serialize_employee(employee):
         "id": employee.id,
         "employee_code": employee.employee_code,
         "full_name": employee.full_name,
+        "position": employee.position,
         "is_active": employee.is_active,
         "created_at": employee.created_at.isoformat(),
     }

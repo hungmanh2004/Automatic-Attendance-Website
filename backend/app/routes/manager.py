@@ -106,6 +106,7 @@ def manager_create_employee():
     payload = request.get_json(silent=True) or {}
     employee_code = normalize_text(payload.get("employee_code"))
     full_name = normalize_text(payload.get("full_name"))
+    position = normalize_text(payload.get("position")) or "Nhan vien"
     if not employee_code or not full_name:
         return invalid_request("employee_code and full_name are required")
 
@@ -113,7 +114,7 @@ def manager_create_employee():
     if existing_employee is not None:
         return jsonify({"status": "duplicate_employee_code"}), 409
 
-    employee = Employee(employee_code=employee_code, full_name=full_name)
+    employee = Employee(employee_code=employee_code, full_name=full_name, position=position)
     db.session.add(employee)
     try:
         db.session.commit()
@@ -164,6 +165,7 @@ def manager_attendance():
                 "employee_code": employee.employee_code,
                 "full_name": employee.full_name,
                 "checked_in_at": event.checked_in_at.isoformat(),
+                "distance": event.distance,
                 "snapshot_url": url_for("manager.manager_attendance_snapshot", attendance_id=event.id),
             }
         )
@@ -181,6 +183,16 @@ def manager_attendance():
             "records": records,
         }
     )
+
+
+@manager_bp.get("/manager/dashboard")
+def manager_dashboard():
+    _, error_response = require_manager()
+    if error_response is not None:
+        return error_response
+
+    dashboard_summary = get_service("attendance_service").get_dashboard_summary()
+    return jsonify(dashboard_summary)
 
 
 @manager_bp.get("/manager/attendance/<int:attendance_id>/snapshot")

@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
+import { useManagerAuth } from "../context/ManagerAuthContext";
 import { deleteFaceSamples, enrollFaceSamples, getFaceSamples } from "../lib/api";
 import { getFriendlyErrorMessage } from "../lib/errorMessages";
-import { useManagerAuth } from "../context/ManagerAuthContext";
 
 const TOTAL_SLOTS = 5;
 
-export function EmployeeFacesPage() {
+export default function EmployeeFacesPage() {
   const { employeeId } = useParams();
   const navigate = useNavigate();
   const { setUnauthenticated } = useManagerAuth();
@@ -34,14 +34,7 @@ export function EmployeeFacesPage() {
         navigate("/manager/login", { replace: true });
         return;
       }
-      if (error.status === 404) {
-        setMessage("Không tìm thấy nhân viên.");
-        setMessageType("error");
-        setEmployee(null);
-        setFaceSamples([]);
-        return;
-      }
-      setMessage(error.message || "Không thể tải dữ liệu khuôn mặt.");
+      setMessage(error.message || "Khong the tai du lieu khuon mat.");
       setMessageType("error");
     } finally {
       setLoading(false);
@@ -49,7 +42,7 @@ export function EmployeeFacesPage() {
   }
 
   useEffect(() => {
-    loadFaceSamples();
+    void loadFaceSamples();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId]);
 
@@ -57,19 +50,18 @@ export function EmployeeFacesPage() {
     event.preventDefault();
     setMessage("");
 
-    if (files.length !== 5) {
-      setMessage("Vui lòng chọn chính xác 5 hình ảnh.");
+    if (files.length !== TOTAL_SLOTS) {
+      setMessage(`Can chon dung ${TOTAL_SLOTS} anh khuon mat.`);
       setMessageType("error");
       return;
     }
 
     setSubmitting(true);
-
     try {
       await enrollFaceSamples(employeeId, files);
       setFiles([]);
       await loadFaceSamples();
-      setMessage("Đã đăng ký khuôn mặt thành công!");
+      setMessage("Da cap nhat bo khuon mat nhan vien.");
       setMessageType("success");
     } catch (error) {
       if (error.status === 401) {
@@ -77,7 +69,7 @@ export function EmployeeFacesPage() {
         navigate("/manager/login", { replace: true });
         return;
       }
-      setMessage(getFriendlyErrorMessage(error, "Không thể đăng ký khuôn mặt. Vui lòng thử lại."));
+      setMessage(getFriendlyErrorMessage(error, "Khong the dang ky khuon mat."));
       setMessageType("error");
     } finally {
       setSubmitting(false);
@@ -87,11 +79,10 @@ export function EmployeeFacesPage() {
   async function handleDelete() {
     setDeleting(true);
     setMessage("");
-
     try {
       await deleteFaceSamples(employeeId);
       await loadFaceSamples();
-      setMessage("Đã xóa đăng ký khuôn mặt thành công.");
+      setMessage("Da xoa bo khuon mat hien tai.");
       setMessageType("success");
     } catch (error) {
       if (error.status === 401) {
@@ -99,145 +90,102 @@ export function EmployeeFacesPage() {
         navigate("/manager/login", { replace: true });
         return;
       }
-      setMessage(getFriendlyErrorMessage(error, "Không thể xóa đăng ký khuôn mặt. Vui lòng thử lại."));
+      setMessage(getFriendlyErrorMessage(error, "Khong the xoa bo khuon mat."));
       setMessageType("error");
     } finally {
       setDeleting(false);
     }
   }
 
-  const sampleCount = faceSamples.length;
-  const emptySlots = Math.max(0, TOTAL_SLOTS - sampleCount);
-
   return (
-    <div className="stack-lg page-transition">
-      {/* Header */}
+    <div className="page-shell">
       <div className="page-header">
         <div className="page-header-info">
-          <div className="row" style={{ gap: "var(--sp-2)" }}>
-            <Link to="/manager/employees" className="btn btn-ghost btn-sm" style={{ marginLeft: -8 }}>
-              ← Quay lại
-            </Link>
-          </div>
-          <h1>Đăng ký khuôn mặt</h1>
-          <p>
-            {employee ? `${employee.employee_code} — ${employee.full_name}` : "Đang tải..."}
+          <span className="section-label">Face Enrollment Lab</span>
+          <h1>Quan ly bo 5 anh khuon mat AI</h1>
+          <p className="text-secondary">
+            {employee ? `${employee.employee_code} · ${employee.full_name}` : "Dang tai thong tin nhan vien..."}
           </p>
         </div>
-        <div className="row" style={{ gap: "var(--sp-2)" }}>
-          <span className={`badge ${sampleCount === TOTAL_SLOTS ? "badge-success" : "badge-warning"}`}>
-            {sampleCount}/{TOTAL_SLOTS} mẫu
-          </span>
-        </div>
+        <Link className="btn btn-secondary" to="/manager/employees">
+          Quay lai nhan vien
+        </Link>
       </div>
 
-      {/* Alert */}
-      {message && (
-        <div className={`alert alert-${messageType}`} role={messageType === "error" ? "alert" : undefined}>
-          {message}
-        </div>
-      )}
+      {message ? <div className={`alert alert-${messageType}`}>{message}</div> : null}
 
-      {/* Grid: Face slots left, Upload form right */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "var(--sp-6)", alignItems: "start" }}>
-
-        {/* Face Sample Grid */}
-        <div className="card">
-          <h3 style={{ marginBottom: "var(--sp-4)" }}>Mẫu khuôn mặt hiện tại</h3>
+      <section className="employee-grid">
+        <article className="glass-panel employee-table-panel">
+          <div className="row-between">
+            <div className="stack-sm">
+              <span className="section-label">Registered Samples</span>
+              <h2>Mau khuon mat hien tai</h2>
+            </div>
+            <span className={`badge ${faceSamples.length === TOTAL_SLOTS ? "badge-success" : "badge-warning"}`}>
+              {faceSamples.length}/{TOTAL_SLOTS} mau
+            </span>
+          </div>
 
           {loading ? (
             <div className="loading-row">
               <div className="spinner" />
-              Đang tải dữ liệu...
+              Dang tai du lieu khuon mat...
             </div>
           ) : (
-            <>
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: `repeat(${TOTAL_SLOTS}, 1fr)`,
-                gap: "var(--sp-3)"
-              }}>
-                {faceSamples.map((sample) => (
-                  <div key={sample.id} style={{
-                    aspectRatio: "1",
-                    borderRadius: "var(--radius-sm)",
-                    background: "var(--success-bg)",
-                    border: "2px solid var(--success)",
-                    display: "grid",
-                    placeItems: "center",
-                    fontSize: "13px",
-                    fontWeight: 500,
-                    color: "var(--success)",
-                  }}>
-                    ✓ #{sample.sample_index}
+            <div className="face-grid">
+              {Array.from({ length: TOTAL_SLOTS }).map((_, index) => {
+                const sample = faceSamples[index];
+                return (
+                  <div key={index} className={`face-slot ${sample ? "is-filled" : ""}`}>
+                    <strong>{sample ? `Mau ${sample.sample_index}` : `Slot ${index + 1}`}</strong>
+                    <span>{sample ? "Embedding ready" : "Dang cho anh moi"}</span>
                   </div>
-                ))}
-                {Array.from({ length: emptySlots }).map((_, i) => (
-                  <div key={`empty-${i}`} style={{
-                    aspectRatio: "1",
-                    borderRadius: "var(--radius-sm)",
-                    border: "2px dashed var(--border)",
-                    display: "grid",
-                    placeItems: "center",
-                    fontSize: "12px",
-                    color: "var(--text-hint)",
-                  }}>
-                    Trống
-                  </div>
-                ))}
-              </div>
-
-              {sampleCount > 0 && (
-                <div style={{ marginTop: "var(--sp-4)" }}>
-                  <button
-                    className="btn btn-danger btn-sm"
-                    type="button"
-                    onClick={handleDelete}
-                    disabled={deleting || loading}
-                  >
-                    {deleting ? "Đang xóa..." : "Xóa toàn bộ đăng ký"}
-                  </button>
-                </div>
-              )}
-            </>
+                );
+              })}
+            </div>
           )}
-        </div>
 
-        {/* Upload Form */}
-        <div className="card stack">
-          <h3>Tải lên 5 ảnh khuôn mặt</h3>
-          <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
-            Chọn đúng 5 hình ảnh rõ mặt, từ nhiều góc độ khác nhau để tăng độ chính xác nhận diện.
-          </p>
+          {faceSamples.length > 0 ? (
+            <button className="btn btn-danger" type="button" onClick={handleDelete} disabled={deleting || loading}>
+              {deleting ? "Dang xoa..." : "Xoa toan bo khuon mat"}
+            </button>
+          ) : null}
+        </article>
+
+        <article className="glass-panel employee-create-panel">
+          <div className="stack-sm">
+            <span className="section-label">Upload Kit</span>
+            <h2>Tai len 5 anh huan luyen</h2>
+            <p className="text-secondary">
+              Dung 5 anh ro mat, anh sang on dinh, nhieu goc nhin de AI tao bo embedding chinh xac.
+            </p>
+          </div>
+
           <form className="field-group" onSubmit={handleEnroll}>
             <div className="field">
-              <label htmlFor="face-files">Hình ảnh khuôn mặt</label>
+              <label htmlFor="face-files">Anh khuon mat</label>
               <input
                 id="face-files"
                 type="file"
                 accept="image/*"
                 multiple
-                onChange={(e) => setFiles(Array.from(e.target.files || []))}
-                style={{ padding: "8px" }}
+                onChange={(event) => setFiles(Array.from(event.target.files || []))}
               />
             </div>
-            {files.length > 0 && files.length !== 5 && (
-              <p style={{ fontSize: "12px", color: "var(--warning)" }}>
-                Đã chọn {files.length} ảnh. Cần đúng 5 ảnh.
-              </p>
-            )}
+            <div className="pill">{files.length} / {TOTAL_SLOTS} anh da chon</div>
             <button className="btn btn-primary" type="submit" disabled={submitting}>
               {submitting ? (
-                <><div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> Đang đăng ký...</>
+                <>
+                  <div className="spinner" />
+                  Dang xu ly AI...
+                </>
               ) : (
-                "Đăng ký khuôn mặt"
+                "Dang ky khuon mat"
               )}
             </button>
           </form>
-        </div>
-      </div>
+        </article>
+      </section>
     </div>
   );
 }
-
-export default EmployeeFacesPage;

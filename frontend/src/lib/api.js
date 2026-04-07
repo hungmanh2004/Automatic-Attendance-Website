@@ -81,19 +81,24 @@ export function fetchManagerMe() {
 export const getCurrentManager = fetchManagerMe
 export const getManager = fetchManagerMe
 
+export function fetchDashboardSummary() {
+  return apiRequest('/api/manager/dashboard')
+}
+
 export function fetchEmployees() {
   return apiRequest('/api/manager/employees')
 }
 
 export const getEmployees = fetchEmployees
 
-export function createEmployee(employeeOrCode, fullName) {
+export function createEmployee(employeeOrCode, fullName, position) {
   const employee =
     typeof employeeOrCode === 'object' && employeeOrCode !== null
       ? employeeOrCode
       : {
           employee_code: employeeOrCode,
           full_name: fullName,
+          position,
         }
 
   return apiRequest('/api/manager/employees', {

@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useManagerAuth } from "../context/ManagerAuthContext";
 import { getFriendlyErrorMessage } from "../lib/errorMessages";
 
-export function ManagerLoginPage() {
+export default function ManagerLoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { status, signIn, setError } = useManagerAuth();
@@ -15,7 +15,7 @@ export function ManagerLoginPage() {
 
   useEffect(() => {
     if (status === "authenticated") {
-      navigate("/manager/employees", { replace: true });
+      navigate("/manager/dashboard", { replace: true });
     }
   }, [navigate, status]);
 
@@ -27,66 +27,61 @@ export function ManagerLoginPage() {
 
     try {
       await signIn(username.trim(), password);
-      navigate(location.state?.from || "/manager/employees", { replace: true });
-    } catch (caughtError) {
-      setMessage(getFriendlyErrorMessage(caughtError, "Không thể đăng nhập. Vui lòng thử lại."));
+      navigate(location.state?.from || "/manager/dashboard", { replace: true });
+    } catch (error) {
+      setMessage(getFriendlyErrorMessage(error, "Khong the dang nhap manager."));
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--bg-main)" }}>
-      <div className="page-transition" style={{ width: "100%", maxWidth: 400, padding: "var(--sp-6)" }}>
-        <div className="card-elevated stack" style={{ padding: "var(--sp-8)" }}>
-          <div className="stack-sm" style={{ textAlign: "center", marginBottom: "var(--sp-4)" }}>
-            <h1 style={{ fontSize: "1.5rem" }}>Auto Attendance</h1>
-            <p style={{ color: "var(--text-secondary)", fontSize: "14px" }}>
-              Đăng nhập để quản lý nhân viên và khuôn mặt.
-            </p>
+    <main className="kiosk-shell page-transition" style={{ placeContent: "center" }}>
+      <section className="glass-panel" style={{ maxWidth: 480, margin: "0 auto", padding: 32, display: "grid", gap: 24 }}>
+        <div className="stack-sm">
+          <span className="section-label">Guardian AI Access</span>
+          <h1>Manager Secure Login</h1>
+          <p className="text-secondary">Dang nhap de quan tri kiosk, nhan vien, lich su camera va bao cao AI.</p>
+        </div>
+
+        <form className="field-group" onSubmit={handleSubmit}>
+          <div className="field">
+            <label htmlFor="manager-user">Ten dang nhap</label>
+            <input
+              id="manager-user"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              autoComplete="username"
+              placeholder="admin"
+            />
           </div>
 
-          <form className="field-group" onSubmit={handleSubmit}>
-            <div className="field">
-              <label htmlFor="login-user">Tên đăng nhập</label>
-              <input
-                id="login-user"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                autoComplete="username"
-                placeholder="Nhập tên đăng nhập"
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="login-pass">Mật khẩu</label>
-              <input
-                id="login-pass"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                placeholder="Nhập mật khẩu"
-              />
-            </div>
+          <div className="field">
+            <label htmlFor="manager-pass">Mat khau</label>
+            <input
+              id="manager-pass"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
+              placeholder="Nhap mat khau"
+            />
+          </div>
 
-            {message && (
-              <div className="alert alert-error" role="alert">
-                {message}
-              </div>
+          {message ? <div className="alert alert-error">{message}</div> : null}
+
+          <button className="btn btn-primary" type="submit" disabled={submitting}>
+            {submitting ? (
+              <>
+                <div className="spinner" />
+                Dang xac thuc...
+              </>
+            ) : (
+              "Dang nhap manager"
             )}
-
-            <button className="btn btn-primary" type="submit" disabled={submitting} style={{ width: "100%", marginTop: "var(--sp-2)" }}>
-              {submitting ? (
-                <><div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> Đang đăng nhập...</>
-              ) : (
-                "Đăng nhập"
-              )}
-            </button>
-          </form>
-        </div>
-      </div>
+          </button>
+        </form>
+      </section>
     </main>
   );
 }
-
-export default ManagerLoginPage;

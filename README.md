@@ -100,7 +100,10 @@ SECRET_KEY=change-me-to-a-random-string
 
 ## Chạy bằng Docker Compose
 
-Đây là cách chạy khớp nhất với cấu hình hiện tại của dự án.
+`docker-compose.yml` hiện được cấu hình theo hướng production-ready:
+- Frontend được build bằng Vite và serve bằng Nginx.
+- Nginx proxy `/api` sang backend để frontend và backend cùng origin.
+- Backend chạy bằng Gunicorn thay vì Flask dev server.
 
 ### Yêu cầu
 
@@ -116,9 +119,9 @@ docker compose up --build
 
 Sau khi chạy:
 
-- Frontend: `http://localhost:5173`
-- Guest check-in: `http://localhost:5173/guest`
-- Manager login: `http://localhost:5173/manager/login`
+- Frontend: `http://localhost:8080`
+- Guest check-in: `http://localhost:8080/guest`
+- Manager login: `http://localhost:8080/manager/login`
 - Backend health: `http://localhost:5000/api/health`
 
 Lần chạy đầu có thể chậm hơn do container cần cài dependency và tải model/cache phục vụ nhận diện.
@@ -135,7 +138,9 @@ Nếu tài khoản đã tồn tại, script sẽ in ra `exists:<username>`.
 
 ## Chạy local không dùng Docker
 
-Phù hợp khi bạn muốn debug riêng từng service. Cần lưu ý rằng `frontend/vite.config.js` hiện đang proxy `/api` sang `http://backend:5000`, tương thích tốt với Docker network. Nếu chạy frontend trực tiếp trên máy, hãy đảm bảo target proxy trỏ đúng tới backend host bạn đang dùng.
+Phù hợp khi bạn muốn debug riêng từng service. Frontend local mặc định proxy `/api` sang `http://127.0.0.1:5000`. Khi chạy trong Docker Compose, biến môi trường sẽ đổi target sang `http://backend:5000`.
+
+Vite đã được cấu hình `strictPort` cho cổng `5173`. Nếu cổng này đang bị một frontend cũ chiếm dụng, `npm run dev` sẽ báo lỗi thay vì âm thầm nhảy sang `5174`, giúp tránh mở nhầm giao diện cũ.
 
 ### Backend
 

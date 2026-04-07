@@ -20,6 +20,9 @@ python backend/run.py
 
 $frontendCommand = @"
 Set-Location '$frontendDir'
+`$env:FRONTEND_API_TARGET='http://127.0.0.1:5000'
+`$env:FRONTEND_HOST='127.0.0.1'
+`$env:FRONTEND_PORT='5173'
 npm run dev
 "@
 
