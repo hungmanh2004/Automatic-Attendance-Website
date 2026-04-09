@@ -1,3 +1,5 @@
+import importlib
+import importlib.util
 import sys
 import types
 from datetime import datetime
@@ -53,6 +55,29 @@ def test_guest_checkin_returns_payload_from_recognition_service(app, client):
             "content_type": "image/jpeg",
         }
     ]
+
+
+def test_embedding_service_defers_deepface_import_until_extraction(monkeypatch):
+    module_name = "backend.app.services.embedding"
+    if importlib.util.find_spec(module_name) is None:
+        module_name = "app.services.embedding"
+
+    sys.modules.pop(module_name, None)
+
+    attempted_imports = []
+    original_import = __import__
+
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "deepface":
+            attempted_imports.append((name, tuple(fromlist or ())))
+            raise AssertionError("deepface should be imported lazily")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", guarded_import)
+
+    importlib.import_module(module_name)
+
+    assert attempted_imports == []
 
 
 def test_embedding_service_uses_yolo_and_deepface_arcface(monkeypatch, tmp_path):
@@ -123,8 +148,7 @@ def test_embedding_service_uses_yolo_and_deepface_arcface(monkeypatch, tmp_path)
     service = embedding_mod.EmbeddingService()
     # Inject fake YOLO model directly (skip lazy-load)
     service._yolo_model = FakeYOLO()
-    # Patch DeepFace on the already-imported module (top-level import is cached)
-    monkeypatch.setattr(embedding_mod, "DeepFace", FakeDeepFace)
+    service._deepface_class = FakeDeepFace
 
     embeddings = service.extract_embeddings(frame_bytes)
 

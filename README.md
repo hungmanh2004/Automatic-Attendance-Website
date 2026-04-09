@@ -116,9 +116,9 @@ docker compose up --build
 
 Sau khi chạy:
 
-- Frontend: `http://localhost:5173`
-- Guest check-in: `http://localhost:5173/guest`
-- Manager login: `http://localhost:5173/manager/login`
+- Frontend: `http://localhost:8080`
+- Guest check-in: `http://localhost:8080/guest`
+- Manager login: `http://localhost:8080/manager/login`
 - Backend health: `http://localhost:5000/api/health`
 
 Lần chạy đầu có thể chậm hơn do container cần cài dependency và tải model/cache phục vụ nhận diện.

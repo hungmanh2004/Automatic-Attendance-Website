@@ -16,7 +16,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from deepface import DeepFace
 
 from .face_alignment import align_face
 
@@ -38,6 +37,7 @@ class EmbeddingService:
         self._model_path = str(model_path or _DEFAULT_MODEL_PATH)
         self._yolo_confidence = yolo_confidence
         self._yolo_model = None  # Lazy-loaded
+        self._deepface_class = None  # Lazy-loaded
 
     # ------------------------------------------------------------------
     # Lazy-load model YOLO
@@ -50,6 +50,13 @@ class EmbeddingService:
             self._yolo_model = YOLO(self._model_path)
             logger.info("YOLO face model loaded successfully.")
         return self._yolo_model
+
+    def _get_deepface_class(self):
+        if self._deepface_class is None:
+            from deepface import DeepFace
+
+            self._deepface_class = DeepFace
+        return self._deepface_class
 
     # ------------------------------------------------------------------
     # Public API – giữ nguyên signature cũ để không phá code gọi bên ngoài
@@ -100,7 +107,7 @@ class EmbeddingService:
 
             # Bước 3: DeepFace extract embedding (skip detection vì YOLO đã làm)
             try:
-                face_results = DeepFace.represent(
+                face_results = self._get_deepface_class().represent(
                     img_path=aligned_face,
                     model_name="ArcFace",
                     enforce_detection=False,
