@@ -81,11 +81,46 @@ def test_face_samples_list_returns_employee_and_samples(app, client):
     assert payload["face_samples"] == [
         {
             "id": sample_id,
+            "employee_id": employee["id"],
             "sample_index": 1,
             "image_path": "/tmp/faces/EMP-201/1.jpg",
+            "image_url": f"/api/manager/employees/{employee['id']}/face-samples/1/image",
             "created_at": created_at,
         }
     ]
+
+
+def test_face_sample_image_requires_authentication(client):
+    response = client.get("/api/manager/employees/1/face-samples/1/image")
+
+    assert response.status_code == 401
+    assert response.get_json()["status"] == "unauthorized"
+
+
+def test_face_sample_image_returns_file_bytes(app, client):
+    manager = _create_manager(app)
+    employee = _create_employee(app, employee_code="EMP-202", full_name="View Image")
+
+    with app.app_context():
+        image_path = tmp_path_sample_path(app, employee["id"], 1)
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        image_path.write_bytes(b"face-image")
+        db.session.add(
+            FaceSample(
+                employee_id=employee["id"],
+                sample_index=1,
+                image_path=str(image_path),
+                embedding_json="[0.1, 0.2, 0.3]",
+            )
+        )
+        db.session.commit()
+
+    _login_manager(client, manager)
+
+    response = client.get(f"/api/manager/employees/{employee['id']}/face-samples/1/image")
+
+    assert response.status_code == 200
+    assert response.data == b"face-image"
 
 
 def test_face_enrollment_requires_authentication(client):
@@ -362,6 +397,159 @@ def test_enrolled_faces_are_immediately_visible_to_guest_recognition(app, client
     assert payload["employee_id"] == employee["id"]
     assert payload["employee_code"] == "EMP-310"
     assert payload["full_name"] == "Recognition Ready"
+
+
+def test_face_sample_replace_requires_authentication(client):
+    response = client.put(
+        "/api/manager/employees/1/face-samples/1",
+        data={"image": (BytesIO(b"face"), "1.jpg")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 401
+    assert response.get_json()["status"] == "unauthorized"
+
+
+def test_face_sample_replace_validates_sample_index(app, client):
+    manager = _create_manager(app)
+    employee = _create_employee(app, employee_code="EMP-311", full_name="Out Of Range")
+    _login_manager(client, manager)
+
+    response = client.put(
+        f"/api/manager/employees/{employee['id']}/face-samples/6",
+        data={"image": (BytesIO(b"face"), "1.jpg")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["status"] == "invalid_request"
+
+
+def test_face_sample_replace_updates_existing_slot_and_refreshes_index(app, client):
+    manager = _create_manager(app)
+    employee = _create_employee(app, employee_code="EMP-312", full_name="Replace Me")
+    _login_manager(client, manager)
+
+    refresh_calls = {"count": 0}
+
+    class FakeEmbeddingService:
+        def extract_embeddings(self, frame_bytes):
+            assert frame_bytes == b"replacement-face"
+            return [[0.9, 0.2, 0.3]]
+
+    class FakeFaceIndexService:
+        def refresh(self):
+            refresh_calls["count"] += 1
+
+    app.extensions["embedding_service"] = FakeEmbeddingService()
+    app.extensions["face_index_service"] = FakeFaceIndexService()
+
+    with app.app_context():
+        image_path = tmp_path_sample_path(app, employee["id"], 3)
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        image_path.write_bytes(b"old-face")
+        db.session.add(
+            FaceSample(
+                employee_id=employee["id"],
+                sample_index=3,
+                image_path=str(image_path),
+                embedding_json="[0.1, 0.2, 0.3]",
+            )
+        )
+        db.session.commit()
+
+    response = client.put(
+        f"/api/manager/employees/{employee['id']}/face-samples/3",
+        data={"image": (BytesIO(b"replacement-face"), "3.jpg")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "updated"
+    assert payload["face_sample"]["sample_index"] == 3
+    assert payload["face_sample"]["employee_id"] == employee["id"]
+    assert refresh_calls["count"] == 1
+
+    with app.app_context():
+        sample = FaceSample.query.filter_by(employee_id=employee["id"], sample_index=3).one()
+        assert Path(sample.image_path).read_bytes() == b"replacement-face"
+        assert sample.embedding_json == "[0.9, 0.2, 0.3]"
+
+
+def test_face_sample_replace_creates_missing_slot(app, client):
+    manager = _create_manager(app)
+    employee = _create_employee(app, employee_code="EMP-313", full_name="Create Slot")
+    _login_manager(client, manager)
+
+    class FakeEmbeddingService:
+        def extract_embeddings(self, frame_bytes):
+            return [[0.5, 0.2, 0.3]]
+
+    class FakeFaceIndexService:
+        def refresh(self):
+            return None
+
+    app.extensions["embedding_service"] = FakeEmbeddingService()
+    app.extensions["face_index_service"] = FakeFaceIndexService()
+
+    response = client.put(
+        f"/api/manager/employees/{employee['id']}/face-samples/2",
+        data={"image": (BytesIO(b"new-face"), "2.jpg")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["face_sample"]["sample_index"] == 2
+
+    with app.app_context():
+        sample = FaceSample.query.filter_by(employee_id=employee["id"], sample_index=2).one()
+        assert Path(sample.image_path).exists()
+
+
+def test_face_sample_replace_rejects_no_face_without_mutating_existing_slot(app, client):
+    manager = _create_manager(app)
+    employee = _create_employee(app, employee_code="EMP-314", full_name="No Face Replace")
+    _login_manager(client, manager)
+
+    class FakeEmbeddingService:
+        def extract_embeddings(self, frame_bytes):
+            return []
+
+    class FakeFaceIndexService:
+        def refresh(self):
+            raise AssertionError("refresh should not be called on failure")
+
+    app.extensions["embedding_service"] = FakeEmbeddingService()
+    app.extensions["face_index_service"] = FakeFaceIndexService()
+
+    with app.app_context():
+        image_path = tmp_path_sample_path(app, employee["id"], 4)
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        image_path.write_bytes(b"old-face")
+        db.session.add(
+            FaceSample(
+                employee_id=employee["id"],
+                sample_index=4,
+                image_path=str(image_path),
+                embedding_json="[0.1, 0.2, 0.3]",
+            )
+        )
+        db.session.commit()
+
+    response = client.put(
+        f"/api/manager/employees/{employee['id']}/face-samples/4",
+        data={"image": (BytesIO(b"bad-face"), "4.jpg")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["status"] == "no_face"
+
+    with app.app_context():
+        sample = FaceSample.query.filter_by(employee_id=employee["id"], sample_index=4).one()
+        assert Path(sample.image_path).read_bytes() == b"old-face"
+        assert sample.embedding_json == "[0.1, 0.2, 0.3]"
 
 
 def test_face_deletion_requires_authentication(client):

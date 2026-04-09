@@ -54,7 +54,7 @@ class AttendanceService:
             raise
         return event, True
 
-    def list_attendance_events(self, from_date=None, to_date=None, search=None):
+    def list_attendance_events(self, from_date=None, to_date=None, search=None, department=None, position=None):
         query = (
             db.session.query(AttendanceEvent, Employee)
             .join(Employee, AttendanceEvent.employee_id == Employee.id)
@@ -74,6 +74,14 @@ class AttendanceService:
                     func.lower(Employee.full_name).like(pattern),
                 )
             )
+
+        normalized_department = (department or "").strip()
+        if normalized_department:
+            query = query.filter(Employee.department == normalized_department)
+
+        normalized_position = (position or "").strip()
+        if normalized_position:
+            query = query.filter(Employee.position == normalized_position)
 
         return query.order_by(AttendanceEvent.checked_in_at.desc(), AttendanceEvent.id.desc()).all()
 
@@ -103,6 +111,8 @@ class AttendanceService:
                     'id': event.id,
                     'employee_code': employee.employee_code if employee else 'N/A',
                     'full_name': employee.full_name if employee else 'Unknown',
+                    'department': employee.department if employee else 'N/A',
+                    'position': employee.position if employee else 'N/A',
                     'checked_in_at': event.checked_in_at.isoformat(),
                     'status': _derive_status(event.checked_in_at),
                     'confidence': _derive_confidence(event.distance),
@@ -127,6 +137,7 @@ class AttendanceService:
                     'id': employee.id,
                     'employee_code': employee.employee_code,
                     'full_name': employee.full_name,
+                    'department': employee.department or 'Văn phòng',
                     'position': employee.position or 'Nhan vien',
                     'is_active': employee.is_active,
                     'total_days_worked': total_days_worked,

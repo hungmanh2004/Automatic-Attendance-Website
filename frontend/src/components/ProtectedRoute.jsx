@@ -12,7 +12,7 @@ export function ProtectedRoute({ children }) {
         <div className="glass-panel" style={{ maxWidth: 420, margin: "0 auto", padding: 28 }}>
           <div className="loading-row">
             <div className="spinner" />
-            Dang kiem tra phien dang nhap quan ly...
+            Đang kiểm tra phiên đăng nhập quản lý...
           </div>
         </div>
       </main>

@@ -1,22 +1,24 @@
 const FRIENDLY_ERROR_MESSAGES = {
-  already_checked_in: 'Nhan vien nay da duoc diem danh truoc do.',
-  denied: 'Quyen camera da bi tu choi. Hay cho phep camera va thu lai.',
-  duplicate_employee_code: 'Ma nhan vien da ton tai.',
-  face_registration_exists: 'Nhan vien nay da co dang ky khuon mat. Hay xoa truoc khi dang ky lai.',
-  invalid_credentials: 'Ten dang nhap hoac mat khau khong dung.',
-  invalid_request: 'Yeu cau gui len khong hop le. Hay thu lai.',
-  multiple_faces: 'Trong khung hinh co nhieu hon mot khuon mat. Hay de chi mot nguoi vao khung.',
-  network_error: 'Khong the ket noi toi may chu. Hay thu lai.',
-  no_face: 'Khong phat hien khuon mat. Hay dieu chinh goc nhin va thu lai.',
-  rate_limited: 'Ban dang gui qua nhieu yeu cau. Hay doi vai giay roi thu lai.',
-  unauthorized: 'Ban can dang nhap lai.',
-  unknown: 'Khong xac dinh duoc khuon mat. Hay thu lai.',
+  already_checked_in: 'Nhân viên này đã được điểm danh trước đó.',
+  denied: 'Quyền camera đã bị từ chối. Hãy cho phép camera và thử lại.',
+  duplicate_employee_code: 'Mã nhân viên đã tồn tại.',
+  employee_not_found: 'Không tìm thấy nhân viên được yêu cầu.',
+  face_registration_exists: 'Nhân viên này đã có đăng ký khuôn mặt. Hãy xóa trước khi đăng ký lại.',
+  face_sample_not_found: 'Không tìm thấy ảnh khuôn mặt được yêu cầu.',
+  invalid_credentials: 'Tên đăng nhập hoặc mật khẩu không đúng.',
+  invalid_request: 'Yêu cầu gửi lên không hợp lệ. Hãy thử lại.',
+  multiple_faces: 'Trong khung hình có nhiều hơn một khuôn mặt. Hãy để chỉ một người vào khung.',
+  network_error: 'Không thể kết nối tới máy chủ. Hãy thử lại.',
+  no_face: 'Không phát hiện khuôn mặt. Hãy điều chỉnh góc nhìn và thử lại.',
+  rate_limited: 'Bạn đang gửi quá nhiều yêu cầu. Hãy đợi vài giây rồi thử lại.',
+  unauthorized: 'Bạn cần đăng nhập lại.',
+  unknown: 'Không xác định được khuôn mặt. Hãy thử lại.',
 }
 
 const GUEST_RESULT_COPY = {
   already_checked_in: {
-    label: 'Da diem danh',
-    message: 'Khuon mat da duoc ghi nhan truoc do trong ngay hom nay.',
+    label: 'Đã điểm danh',
+    message: 'Khuôn mặt đã được ghi nhận trước đó trong ngày hôm nay.',
     tone: 'info',
     meta: (payload) =>
       [payload?.employee_code, payload?.full_name, payload?.checked_in_at]
@@ -24,23 +26,23 @@ const GUEST_RESULT_COPY = {
         .join(' | '),
   },
   multiple_faces: {
-    label: 'Nhieu khuon mat',
-    message: 'Chi can mot nguoi trong khung hinh de he thong nhan dien chinh xac hon.',
+    label: 'Nhiều khuôn mặt',
+    message: 'Chỉ cần một người trong khung hình để hệ thống nhận diện chính xác hơn.',
     tone: 'warning',
   },
   network_error: {
-    label: 'Loi ket noi',
-    message: 'Khong the ket noi toi may chu. Hay thu lai.',
+    label: 'Lỗi kết nối',
+    message: 'Không thể kết nối tới máy chủ. Hãy thử lại.',
     tone: 'warning',
   },
   no_face: {
-    label: 'Chua thay khuon mat',
-    message: 'Hay dua mat vao trung tam khung hinh va giu anh sang on dinh.',
+    label: 'Chưa thấy khuôn mặt',
+    message: 'Hãy đưa mặt vào trung tâm khung hình và giữ ánh sáng ổn định.',
     tone: 'warning',
   },
   recognized: {
-    label: 'Diem danh thanh cong',
-    message: 'Nhan dien thanh cong va da ghi nhan check-in.',
+    label: 'Điểm danh thành công',
+    message: 'Nhận diện thành công và đã ghi nhận check-in.',
     tone: 'success',
     meta: (payload) =>
       [payload?.employee_code, payload?.full_name, payload?.checked_in_at]
@@ -48,13 +50,13 @@ const GUEST_RESULT_COPY = {
         .join(' | '),
   },
   unknown: {
-    label: 'Khong nhan dien duoc',
-    message: 'He thong chua xac dinh duoc khuon mat. Hay thu lai voi goc nhin ro hon.',
+    label: 'Không nhận diện được',
+    message: 'Hệ thống chưa xác định được khuôn mặt. Hãy thử lại với góc nhìn rõ hơn.',
     tone: 'neutral',
   },
 }
 
-export function getFriendlyBackendErrorMessage(errorOrCode, fallback = 'Da co loi xay ra.') {
+export function getFriendlyBackendErrorMessage(errorOrCode, fallback = 'Đã có lỗi xảy ra.') {
   if (!errorOrCode) return fallback
 
   const candidateValues = []
@@ -101,15 +103,15 @@ export const getGuestRecognitionMessage = getGuestStatusMessage
 export function getGuestResultCopy(payload) {
   if (!payload?.status) {
     return {
-      label: 'Chua co ket qua',
-      message: 'He thong dang san sang.',
+      label: 'Chưa có kết quả',
+      message: 'Hệ thống đang sẵn sàng.',
       tone: 'neutral',
     }
   }
 
   const copy =
     GUEST_RESULT_COPY[payload.status] || {
-      label: 'Ket qua khac',
+      label: 'Kết quả khác',
       message: getGuestStatusMessage(payload.status),
       tone: 'neutral',
     }

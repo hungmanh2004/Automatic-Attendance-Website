@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { useManagerAuth } from "../context/ManagerAuthContext";
 import { listAttendance } from "../lib/attendanceApi";
+import { getEmployees } from "../lib/api";
 import "./AttendancePage.css";
 
 function formatDate(value) {
@@ -11,8 +12,7 @@ function formatDate(value) {
 }
 
 function getTodayRange() {
-  const now = new Date();
-  const value = formatDate(now);
+  const value = formatDate(new Date());
   return { from: value, to: value };
 }
 
@@ -35,8 +35,14 @@ function getMonthRange() {
 
 function getStatus(record) {
   const date = new Date(record.checked_in_at);
-  if (Number.isNaN(date.getTime())) return "Unknown";
-  return date.getHours() < 9 || (date.getHours() === 9 && date.getMinutes() <= 0) ? "On-time" : "Late";
+  if (Number.isNaN(date.getTime())) return "Chưa xác định";
+  return date.getHours() < 9 || (date.getHours() === 9 && date.getMinutes() <= 0) ? "Đúng giờ" : "Đi muộn";
+}
+
+function getStatusValue(record) {
+  const date = new Date(record.checked_in_at);
+  if (Number.isNaN(date.getTime())) return "unknown";
+  return date.getHours() < 9 || (date.getHours() === 9 && date.getMinutes() <= 0) ? "on_time" : "late";
 }
 
 function getConfidence(record) {
@@ -45,9 +51,12 @@ function getConfidence(record) {
 }
 
 function exportCsv(records) {
-  const header = ["Nhan vien", "Thoi gian", "Trang thai", "Confidence", "Snapshot"];
+  const header = ["Mã nhân viên", "Họ tên", "Phòng ban", "Chức vụ", "Thời gian", "Trạng thái", "Độ khớp", "Ảnh chụp"];
   const rows = records.map((record) => [
-    `${record.employee_code} - ${record.full_name}`,
+    record.employee_code,
+    record.full_name,
+    record.department || "",
+    record.position || "",
     record.checked_in_at,
     getStatus(record),
     getConfidence(record),
@@ -60,7 +69,7 @@ function exportCsv(records) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = "guardian-attendance-report.csv";
+  anchor.download = "lich-su-cham-cong-guardian-ai.csv";
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -71,10 +80,40 @@ export default function AttendancePage() {
   const { setUnauthenticated } = useManagerAuth();
   const todayRange = useMemo(() => getTodayRange(), []);
   const [period, setPeriod] = useState("daily");
-  const [filters, setFilters] = useState({ ...todayRange, search: "", status: "all" });
+  const [filters, setFilters] = useState({
+    ...todayRange,
+    search: "",
+    status: "all",
+    department: "all",
+    position: "all",
+  });
   const [records, setRecords] = useState([]);
+  const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadEmployeesForFilters() {
+      try {
+        const payload = await getEmployees();
+        if (!cancelled) {
+          setEmployees(payload.employees || []);
+        }
+      } catch (caughtError) {
+        if (caughtError?.status === 401) {
+          setUnauthenticated();
+          navigate("/manager/login", { replace: true, state: { from: location.pathname } });
+        }
+      }
+    }
+
+    void loadEmployeesForFilters();
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname, navigate, setUnauthenticated]);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,7 +123,13 @@ export default function AttendancePage() {
       setError("");
 
       try {
-        const payload = await listAttendance(filters);
+        const payload = await listAttendance({
+          from: filters.from,
+          to: filters.to,
+          search: filters.search,
+          department: filters.department === "all" ? "" : filters.department,
+          position: filters.position === "all" ? "" : filters.position,
+        });
         if (cancelled) return;
         setRecords(payload.records || []);
       } catch (caughtError) {
@@ -94,7 +139,7 @@ export default function AttendancePage() {
           return;
         }
         if (!cancelled) {
-          setError(caughtError.message || "Khong the tai du lieu cham cong.");
+          setError(caughtError.message || "Không thể tải dữ liệu chấm công.");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -116,78 +161,97 @@ export default function AttendancePage() {
     }));
   }
 
+  const departmentOptions = useMemo(() => {
+    const values = new Set((employees || []).map((employee) => employee.department).filter(Boolean));
+    return ["all", ...Array.from(values)];
+  }, [employees]);
+
+  const positionOptions = useMemo(() => {
+    const scopedEmployees =
+      filters.department === "all"
+        ? employees
+        : employees.filter((employee) => (employee.department || "Văn phòng") === filters.department);
+    const values = new Set((scopedEmployees || []).map((employee) => employee.position).filter(Boolean));
+    return ["all", ...Array.from(values)];
+  }, [employees, filters.department]);
+
   const filteredRecords = useMemo(() => {
-    return records.filter((record) => {
-      const matchesStatus = filters.status === "all" || getStatus(record) === filters.status;
-      return matchesStatus;
-    });
+    return records.filter((record) => filters.status === "all" || getStatusValue(record) === filters.status);
   }, [filters.status, records]);
 
   return (
     <div className="page-shell">
       <div className="page-header">
         <div className="page-header-info">
-          <span className="section-label">Attendance Control</span>
-          <h1>Lich su cham cong voi bo loc daily, weekly va monthly</h1>
-          <p className="text-secondary">
-            Theo doi su kien check-in, confidence AI, dia diem camera va truy cap nhanh snapshot goc.
-          </p>
+          <span className="section-label">Điều phối chấm công</span>
+          <h1>Lịch sử chấm công với bộ lọc theo thời gian, phòng ban và chức vụ</h1>
+          <p className="text-secondary">Theo dõi sự kiện check-in, độ khớp AI, phòng ban, chức vụ và truy cập nhanh ảnh chụp gốc.</p>
         </div>
         <button className="btn btn-secondary" type="button" onClick={() => exportCsv(filteredRecords)} disabled={filteredRecords.length === 0}>
-          Tai bao cao CSV
+          Tải báo cáo CSV
         </button>
       </div>
 
       <div className="tab-switch">
         <button type="button" className={period === "daily" ? "active" : ""} onClick={() => applyPeriod("daily")}>
-          Daily
+          Theo ngày
         </button>
         <button type="button" className={period === "weekly" ? "active" : ""} onClick={() => applyPeriod("weekly")}>
-          Weekly
+          Theo tuần
         </button>
         <button type="button" className={period === "monthly" ? "active" : ""} onClick={() => applyPeriod("monthly")}>
-          Monthly
+          Theo tháng
         </button>
       </div>
 
       <section className="attendance-filters glass-panel">
         <div className="field">
-          <label htmlFor="attendance-from">Tu ngay</label>
-          <input
-            id="attendance-from"
-            type="date"
-            value={filters.from}
-            onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))}
-          />
+          <label htmlFor="attendance-from">Từ ngày</label>
+          <input id="attendance-from" type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} />
         </div>
         <div className="field">
-          <label htmlFor="attendance-to">Den ngay</label>
-          <input
-            id="attendance-to"
-            type="date"
-            value={filters.to}
-            onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))}
-          />
+          <label htmlFor="attendance-to">Đến ngày</label>
+          <input id="attendance-to" type="date" value={filters.to} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} />
         </div>
         <div className="field">
-          <label htmlFor="attendance-search">Nhan vien</label>
+          <label htmlFor="attendance-search">Tìm nhân viên</label>
           <input
             id="attendance-search"
             value={filters.search}
             onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
-            placeholder="Tim theo ma NV hoac ten"
+            placeholder="Tìm theo mã NV hoặc tên"
           />
         </div>
         <div className="field">
-          <label htmlFor="attendance-status">Trang thai</label>
+          <label htmlFor="attendance-department">Phòng ban</label>
           <select
-            id="attendance-status"
-            value={filters.status}
-            onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}
+            id="attendance-department"
+            value={filters.department}
+            onChange={(event) => setFilters((current) => ({ ...current, department: event.target.value, position: "all" }))}
           >
-            <option value="all">Tat ca</option>
-            <option value="On-time">On-time</option>
-            <option value="Late">Late</option>
+            {departmentOptions.map((option) => (
+              <option key={option} value={option}>
+                {option === "all" ? "Tất cả phòng ban" : option}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="attendance-position">Chức vụ</label>
+          <select id="attendance-position" value={filters.position} onChange={(event) => setFilters((current) => ({ ...current, position: event.target.value }))}>
+            {positionOptions.map((option) => (
+              <option key={option} value={option}>
+                {option === "all" ? "Tất cả chức vụ" : option}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="attendance-status">Trạng thái</label>
+          <select id="attendance-status" value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}>
+            <option value="all">Tất cả</option>
+            <option value="on_time">Đúng giờ</option>
+            <option value="late">Đi muộn</option>
           </select>
         </div>
       </section>
@@ -197,26 +261,28 @@ export default function AttendancePage() {
       {loading ? (
         <div className="loading-row">
           <div className="spinner" />
-          Dang tai du lieu cham cong...
+          Đang tải dữ liệu chấm công...
         </div>
       ) : (
         <section className="glass-panel attendance-table-wrap">
           {filteredRecords.length === 0 ? (
             <div className="empty-state">
-              <h3>Khong co ban ghi phu hop</h3>
-              <p>Thu thay doi bo loc thoi gian, trang thai hoac tu khoa tim kiem.</p>
+              <h3>Không có bản ghi phù hợp</h3>
+              <p>Thử thay đổi bộ lọc thời gian, phòng ban, chức vụ hoặc từ khóa tìm kiếm.</p>
             </div>
           ) : (
             <div className="table-scroll">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Nhan vien</th>
-                    <th>Thoi gian</th>
-                    <th>Trang thai</th>
-                    <th>Confidence</th>
-                    <th>Dia diem</th>
-                    <th>Snapshot</th>
+                    <th>Nhân viên</th>
+                    <th>Phòng ban</th>
+                    <th>Chức vụ</th>
+                    <th>Thời gian</th>
+                    <th>Trạng thái</th>
+                    <th>Độ khớp</th>
+                    <th>Địa điểm</th>
+                    <th>Ảnh chụp</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -226,17 +292,17 @@ export default function AttendancePage() {
                         <strong>{record.full_name}</strong>
                         <div className="text-secondary">{record.employee_code}</div>
                       </td>
+                      <td>{record.department || "Văn phòng"}</td>
+                      <td>{record.position || "Nhân viên"}</td>
                       <td>{new Date(record.checked_in_at).toLocaleString()}</td>
                       <td>
-                        <span className={`badge ${getStatus(record) === "Late" ? "badge-warning" : "badge-success"}`}>
-                          {getStatus(record)}
-                        </span>
+                        <span className={`badge ${getStatusValue(record) === "late" ? "badge-warning" : "badge-success"}`}>{getStatus(record)}</span>
                       </td>
                       <td>{getConfidence(record)}</td>
-                      <td>Main Gate</td>
+                      <td>Cổng chính</td>
                       <td>
                         <a className="btn btn-ghost btn-sm" href={record.snapshot_url} target="_blank" rel="noreferrer">
-                          Xem anh
+                          Xem ảnh
                         </a>
                       </td>
                     </tr>

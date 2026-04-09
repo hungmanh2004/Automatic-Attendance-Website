@@ -29,10 +29,7 @@ export default function ReportsPage() {
       setLoading(true);
       setError("");
       try {
-        const [dashboardPayload, attendancePayload] = await Promise.all([
-          fetchDashboardSummary(),
-          listAttendance({}),
-        ]);
+        const [dashboardPayload, attendancePayload] = await Promise.all([fetchDashboardSummary(), listAttendance({})]);
         if (cancelled) return;
         setDashboard(dashboardPayload);
         setRecords(attendancePayload.records || []);
@@ -42,7 +39,7 @@ export default function ReportsPage() {
           return;
         }
         if (!cancelled) {
-          setError(caughtError.message || "Khong the tai du lieu bao cao.");
+          setError(caughtError.message || "Không thể tải dữ liệu báo cáo.");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -58,33 +55,31 @@ export default function ReportsPage() {
   const cards = useMemo(() => {
     const summary = dashboard?.summary || {};
     return [
-      ["Tong nhan vien", summary.total_employees ?? 0],
-      ["Cham cong hom nay", summary.checked_in_today ?? 0],
-      ["Attendance rate", `${summary.attendance_rate ?? 0}%`],
-      ["Failed scans", summary.failed_scans_today ?? 0],
+      ["Tổng nhân viên", summary.total_employees ?? 0],
+      ["Chấm công hôm nay", summary.checked_in_today ?? 0],
+      ["Tỷ lệ điểm danh", `${summary.attendance_rate ?? 0}%`],
+      ["Lượt quét lỗi", summary.failed_scans_today ?? 0],
     ];
   }, [dashboard]);
 
   function handleExportAll() {
-    exportFile("guardian-ai-report.csv", [
-      ["Employee Code", "Full Name", "Checked In At", "Snapshot"],
+    exportFile("bao-cao-lich-su-guardian-ai.csv", [
+      ["Mã nhân viên", "Họ và tên", "Thời gian điểm danh", "Ảnh chụp"],
       ...records.map((record) => [record.employee_code, record.full_name, record.checked_in_at, record.snapshot_url || ""]),
     ]);
   }
 
   function handleExportSummary() {
-    exportFile("guardian-ai-summary.csv", [["Metric", "Value"], ...cards]);
+    exportFile("tong-hop-kpi-guardian-ai.csv", [["Chỉ số", "Giá trị"], ...cards]);
   }
 
   return (
     <div className="page-shell">
       <div className="page-header">
         <div className="page-header-info">
-          <span className="section-label">Reporting Hub</span>
-          <h1>Trung tam bao cao va xuat du lieu</h1>
-          <p className="text-secondary">
-            Tao goi CSV nhanh cho KPI tong quan va lich su camera de chia se voi van hanh hoac HR.
-          </p>
+          <span className="section-label">Trung tâm báo cáo</span>
+          <h1>Trung tâm báo cáo và xuất dữ liệu</h1>
+          <p className="text-secondary">Tạo gói CSV nhanh cho KPI tổng quan và lịch sử camera để chia sẻ với vận hành hoặc nhân sự.</p>
         </div>
       </div>
 
@@ -93,7 +88,7 @@ export default function ReportsPage() {
       {loading ? (
         <div className="loading-row">
           <div className="spinner" />
-          Dang tai bo du lieu bao cao...
+          Đang tải bộ dữ liệu báo cáo...
         </div>
       ) : (
         <>
@@ -102,7 +97,7 @@ export default function ReportsPage() {
               <article key={label} className="kpi-card">
                 <span className="section-label">{label}</span>
                 <strong>{value}</strong>
-                <p className="text-secondary">Guardian AI snapshot</p>
+                <p className="text-secondary">Ảnh chụp nhanh từ Guardian AI</p>
               </article>
             ))}
           </section>
@@ -110,36 +105,34 @@ export default function ReportsPage() {
           <section className="employee-grid">
             <article className="glass-panel employee-table-panel">
               <div className="stack-sm">
-                <span className="section-label">Export Center</span>
-                <h2>Tap lenh xuat bao cao</h2>
-                <p className="text-secondary">
-                  Chon loai file can chia se va tai ve ngay lap tuc theo du lieu hien co trong he thong.
-                </p>
+                <span className="section-label">Khu xuất dữ liệu</span>
+                <h2>Tập lệnh xuất báo cáo</h2>
+                <p className="text-secondary">Chọn loại file cần chia sẻ và tải về ngay lập tức theo dữ liệu hiện có trong hệ thống.</p>
               </div>
 
               <div className="report-actions">
                 <button type="button" className="btn btn-primary" onClick={handleExportAll}>
-                  Tai lich su CSV
+                  Tải lịch sử CSV
                 </button>
                 <button type="button" className="btn btn-secondary" onClick={handleExportSummary}>
-                  Tai KPI summary
+                  Tải tổng hợp KPI
                 </button>
               </div>
             </article>
 
             <article className="glass-panel employee-create-panel">
               <div className="stack-sm">
-                <span className="section-label">AI Notes</span>
-                <h2>Goi y van hanh</h2>
+                <span className="section-label">Gợi ý AI</span>
+                <h2>Gợi ý vận hành</h2>
               </div>
               <div className="insight-list">
                 <div className="insight-card">
-                  <strong>Export ngay cuoi tuan</strong>
-                  <p className="text-secondary">Dung file lich su de doi chieu cham cong va camera snapshot.</p>
+                  <strong>Xuất báo cáo cuối tuần</strong>
+                  <p className="text-secondary">Dùng file lịch sử để đối chiếu chấm công và ảnh chụp từ camera.</p>
                 </div>
                 <div className="insight-card">
-                  <strong>Review confidence thap</strong>
-                  <p className="text-secondary">Danh sach confidence thap nen duoc xac minh lai bo mau khuon mat.</p>
+                  <strong>Rà soát độ khớp thấp</strong>
+                  <p className="text-secondary">Danh sách độ khớp thấp nên được xác minh lại bộ mẫu khuôn mặt.</p>
                 </div>
               </div>
             </article>

@@ -15,7 +15,13 @@ function formatTime(value) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-const chartDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+function translateStatus(status) {
+  if (status === "Late") return "Đi muộn";
+  if (status === "On-time") return "Đúng giờ";
+  return status || "Chưa xác định";
+}
+
+const chartDays = ["Th 2", "Th 3", "Th 4", "Th 5", "Th 6", "Th 7", "CN"];
 
 export default function DashboardPage() {
   const { setUnauthenticated } = useManagerAuth();
@@ -40,7 +46,7 @@ export default function DashboardPage() {
           return;
         }
         if (!cancelled) {
-          setError(caughtError.message || "Khong the tai dashboard.");
+          setError(caughtError.message || "Không thể tải trang tổng quan.");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -65,24 +71,24 @@ export default function DashboardPage() {
 
   const kpis = [
     {
-      label: "Tong luot cham hom nay",
+      label: "Tổng lượt chấm hôm nay",
       value: summary.checked_in_today ?? 0,
-      delta: `${summary.attendance_rate ?? 0}% coverage`,
+      delta: `${summary.attendance_rate ?? 0}% tỷ lệ bao phủ`,
     },
     {
-      label: "Dung gio",
+      label: "Đúng giờ",
       value: summary.on_time_today ?? 0,
-      delta: "Compared with target 09:00",
+      delta: "So với mốc mục tiêu 09:00",
     },
     {
-      label: "Di muon",
+      label: "Đi muộn",
       value: summary.late_today ?? 0,
-      delta: "Realtime attendance warning",
+      delta: "Cảnh báo chấm công theo thời gian thực",
     },
     {
-      label: "Loi / khong cham",
+      label: "Lỗi / chưa chấm",
       value: (summary.failed_scans_today ?? 0) + (summary.absent_today ?? 0),
-      delta: "Need manual review",
+      delta: "Cần rà soát thủ công",
     },
   ];
 
@@ -90,13 +96,13 @@ export default function DashboardPage() {
     <div className="dashboard-shell page-shell">
       <div className="page-header">
         <div className="page-header-info">
-          <span className="section-label">Guardian AI Dashboard</span>
-          <h1>Dieu phoi cham cong doanh nghiep theo thoi gian thuc</h1>
+          <span className="section-label">Tổng quan Guardian AI</span>
+          <h1>Điều phối chấm công doanh nghiệp theo thời gian thực</h1>
           <p className="text-secondary">
-            Tong hop KPI, xu huong thang, su kien camera va danh sach nhan vien can theo doi ngay trong mot command center.
+            Tổng hợp KPI, xu hướng tháng, sự kiện camera và danh sách nhân viên cần theo dõi ngay trong một trung tâm điều phối.
           </p>
         </div>
-        <div className="pill">Realtime sync active</div>
+        <div className="pill">Đồng bộ thời gian thực đang bật</div>
       </div>
 
       {error ? <div className="alert alert-error">{error}</div> : null}
@@ -104,7 +110,7 @@ export default function DashboardPage() {
       {loading ? (
         <div className="loading-row">
           <div className="spinner" />
-          Dang tai dashboard Guardian AI...
+          Đang tải trang tổng quan Guardian AI...
         </div>
       ) : null}
 
@@ -124,10 +130,10 @@ export default function DashboardPage() {
             <article className="glass-panel overview-chart">
               <div className="row-between">
                 <div className="stack-sm">
-                  <span className="section-label">Attendance Trend</span>
-                  <h2>Bar chart theo ngay trong tuan</h2>
+                  <span className="section-label">Xu hướng chấm công</span>
+                  <h2>Biểu đồ theo ngày trong tuần</h2>
                 </div>
-                <span className="pill">{summary.monthly_attendance_count ?? 0} records this month</span>
+                <span className="pill">{summary.monthly_attendance_count ?? 0} bản ghi trong tháng</span>
               </div>
 
               <div className="bar-chart">
@@ -144,40 +150,40 @@ export default function DashboardPage() {
               <div className="line-summary">
                 <div>
                   <strong>{summary.attendance_rate ?? 0}%</strong>
-                  <span>Ty le diem danh hom nay</span>
+                  <span>Tỷ lệ điểm danh hôm nay</span>
                 </div>
                 <div>
                   <strong>{summary.absent_today ?? 0}</strong>
-                  <span>Nhan vien can follow-up</span>
+                  <span>Nhân viên cần theo dõi</span>
                 </div>
                 <div>
                   <strong>{summary.failed_scans_today ?? 0}</strong>
-                  <span>Scan fail canh bao</span>
+                  <span>Lượt quét lỗi cần cảnh báo</span>
                 </div>
               </div>
             </article>
 
             <article className="glass-panel quick-insights">
               <div className="stack-sm">
-                <span className="section-label">AI Signals</span>
-                <h2>Canh bao thong minh</h2>
+                <span className="section-label">Tín hiệu AI</span>
+                <h2>Cảnh báo thông minh</h2>
               </div>
 
               <div className="insight-list">
                 <div className="insight-card">
-                  <span className="badge badge-success">Stable</span>
-                  <strong>Camera kiosk san sang</strong>
-                  <p className="text-secondary">Nen tang dang duy tri luong scan on dinh va session manager hop le.</p>
+                  <span className="badge badge-success">Ổn định</span>
+                  <strong>Camera điểm danh sẵn sàng</strong>
+                  <p className="text-secondary">Nền tảng đang duy trì luồng quét ổn định và phiên quản trị hợp lệ.</p>
                 </div>
                 <div className="insight-card">
-                  <span className="badge badge-warning">Watchlist</span>
-                  <strong>{summary.late_today ?? 0} nhan vien di muon</strong>
-                  <p className="text-secondary">Theo doi khuon gio cao diem va canh bao cho bo phan van hanh.</p>
+                  <span className="badge badge-warning">Theo dõi</span>
+                  <strong>{summary.late_today ?? 0} nhân viên đi muộn</strong>
+                  <p className="text-secondary">Theo dõi khung giờ cao điểm và cảnh báo cho bộ phận vận hành.</p>
                 </div>
                 <div className="insight-card">
-                  <span className="badge badge-error">Review</span>
-                  <strong>{summary.absent_today ?? 0} chua cham cong</strong>
-                  <p className="text-secondary">Kiem tra danh sach vang va xu ly xac nhan bang tay neu can.</p>
+                  <span className="badge badge-error">Rà soát</span>
+                  <strong>{summary.absent_today ?? 0} chưa chấm công</strong>
+                  <p className="text-secondary">Kiểm tra danh sách vắng và xử lý xác nhận bằng tay nếu cần.</p>
                 </div>
               </div>
             </article>
@@ -185,16 +191,16 @@ export default function DashboardPage() {
             <article className="glass-panel daily-log-panel">
               <div className="row-between">
                 <div className="stack-sm">
-                  <span className="section-label">Recent Recognition</span>
-                  <h2>Nhat ky check-in hom nay</h2>
+                  <span className="section-label">Nhận diện gần đây</span>
+                  <h2>Nhật ký điểm danh hôm nay</h2>
                 </div>
-                <span className="pill">{dailyLog.length} su kien moi nhat</span>
+                <span className="pill">{dailyLog.length} sự kiện mới nhất</span>
               </div>
 
               {dailyLog.length === 0 ? (
                 <div className="empty-state">
-                  <h3>Chua co check-in hom nay</h3>
-                  <p>Du lieu se hien thi tai day ngay khi camera nhan dien thanh cong.</p>
+                  <h3>Chưa có lượt điểm danh hôm nay</h3>
+                  <p>Dữ liệu sẽ hiển thị tại đây ngay khi camera nhận diện thành công.</p>
                 </div>
               ) : (
                 <div className="recognition-feed">
@@ -208,7 +214,9 @@ export default function DashboardPage() {
                         </span>
                       </div>
                       <div className="recognition-side">
-                        <span className={`badge ${item.status === "Late" ? "badge-warning" : "badge-success"}`}>{item.status}</span>
+                        <span className={`badge ${item.status === "Late" ? "badge-warning" : "badge-success"}`}>
+                          {translateStatus(item.status)}
+                        </span>
                         <strong>{item.confidence ?? "N/A"}</strong>
                       </div>
                     </div>

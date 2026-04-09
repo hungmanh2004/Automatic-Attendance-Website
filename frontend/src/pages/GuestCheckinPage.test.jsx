@@ -1,265 +1,257 @@
-import { createRef } from 'react'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import GuestCheckinPage from './GuestCheckinPage'
+import { createRef } from "react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-let cameraMode = 'ready'
-let intervalCallbacks = []
-const submitGuestCheckin = vi.fn()
-const captureGuestFrame = vi.fn()
-const retryCamera = vi.fn()
-const stopCamera = vi.fn()
+import GuestCheckinPage from "./GuestCheckinPage";
+
+let cameraMode = "ready";
+let intervalCallbacks = [];
+const submitGuestCheckin = vi.fn();
+const captureGuestFrame = vi.fn();
+const retryCamera = vi.fn();
+const stopCamera = vi.fn();
 
 function getCameraState() {
-  if (cameraMode === 'denied') {
+  if (cameraMode === "denied") {
     return {
-      cameraError: 'Quyen camera da bi tu choi. Hay cho phep camera va thu lai.',
-      cameraState: 'denied',
-    }
+      cameraError: "Quyền camera đã bị từ chối. Hãy cho phép camera và thử lại.",
+      cameraState: "denied",
+    };
   }
 
-  if (cameraMode === 'unavailable') {
+  if (cameraMode === "unavailable") {
     return {
-      cameraError: 'Khong tim thay camera phu hop tren thiet bi nay.',
-      cameraState: 'unavailable',
-    }
+      cameraError: "Không tìm thấy camera phù hợp trên thiết bị này.",
+      cameraState: "unavailable",
+    };
   }
 
   return {
-    cameraError: '',
-    cameraState: 'ready',
-  }
+    cameraError: "",
+    cameraState: "ready",
+  };
 }
 
-vi.mock('../hooks/useGuestCamera', () => ({
+function renderGuestPage() {
+  return render(
+    <MemoryRouter>
+      <GuestCheckinPage />
+    </MemoryRouter>,
+  );
+}
+
+vi.mock("../hooks/useGuestCamera", () => ({
   useGuestCamera: () => ({
     ...getCameraState(),
     retryCamera,
     stopCamera,
     videoRef: createRef(),
   }),
-}))
+}));
 
-vi.mock('../lib/guestApi', () => ({
+vi.mock("../lib/guestApi", () => ({
   captureGuestFrame: (...args) => captureGuestFrame(...args),
   submitGuestCheckin: (...args) => submitGuestCheckin(...args),
-}))
+}));
 
-describe('GuestCheckinPage', () => {
+describe("GuestCheckinPage", () => {
   beforeEach(() => {
-    cameraMode = 'ready'
-    intervalCallbacks = []
-    submitGuestCheckin.mockReset()
-    captureGuestFrame.mockReset()
-    retryCamera.mockReset()
-    stopCamera.mockReset()
+    cameraMode = "ready";
+    intervalCallbacks = [];
+    submitGuestCheckin.mockReset();
+    captureGuestFrame.mockReset();
+    retryCamera.mockReset();
+    stopCamera.mockReset();
 
-    vi.spyOn(window, 'setInterval').mockImplementation((callback) => {
-      intervalCallbacks.push(callback)
-      return intervalCallbacks.length
-    })
-    vi.spyOn(window, 'clearInterval').mockImplementation(() => {})
-  })
+    vi.spyOn(window, "setInterval").mockImplementation((callback) => {
+      intervalCallbacks.push(callback);
+      return intervalCallbacks.length;
+    });
+    vi.spyOn(window, "clearInterval").mockImplementation(() => {});
+  });
 
   afterEach(() => {
-    vi.restoreAllMocks()
-  })
+    vi.restoreAllMocks();
+  });
 
-  it('renders the guest check-in camera page', () => {
-    render(<GuestCheckinPage />)
+  it("renders the guest check-in camera page", () => {
+    renderGuestPage();
 
-    expect(
-      screen.getByRole('heading', { name: /quet khuon mat ngay tren trinh duyet/i }),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /bat dau quet/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /tam dung/i })).toBeInTheDocument()
-  })
+    expect(screen.getByRole("heading", { name: /điểm danh khuôn mặt thông minh/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /dừng quét/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /mở khu quản trị/i })).toBeInTheDocument();
+  });
 
-  it('renders unknown and multiple_faces result copy', async () => {
-    captureGuestFrame.mockResolvedValue(new File(['guest'], 'guest-frame.jpg', { type: 'image/jpeg' }))
-    submitGuestCheckin.mockResolvedValueOnce({ status: 'unknown' }).mockResolvedValueOnce({
-      status: 'multiple_faces',
-    })
+  it("renders unknown and multiple_faces result copy", async () => {
+    captureGuestFrame.mockResolvedValue(new File(["guest"], "guest-frame.jpg", { type: "image/jpeg" }));
+    submitGuestCheckin.mockResolvedValueOnce({ status: "unknown" }).mockResolvedValueOnce({
+      status: "multiple_faces",
+    });
 
-    render(<GuestCheckinPage />)
-    fireEvent.click(screen.getByRole('button', { name: /bat dau quet/i }))
+    renderGuestPage();
 
     await act(async () => {
-      await intervalCallbacks[0]()
-    })
+      await intervalCallbacks[0]();
+    });
 
-    expect(
-      screen.getByText(/he thong chua xac dinh duoc khuon mat/i, {
-        selector: '.guest-status-text',
-      }),
-    ).toBeInTheDocument()
+    expect(screen.getByText(/hệ thống chưa xác định được khuôn mặt/i)).toBeInTheDocument();
 
     await act(async () => {
-      await intervalCallbacks[0]()
-    })
+      await intervalCallbacks[0]();
+    });
 
-    expect(
-      screen.getByText(/chi can mot nguoi trong khung hinh/i, {
-        selector: '.guest-status-text',
-      }),
-    ).toBeInTheDocument()
-  })
+    expect(screen.getByText(/chỉ cần một người trong khung hình/i)).toBeInTheDocument();
+  });
 
-  it('auto-scans one frame at a time and shows success cooldown', async () => {
-    captureGuestFrame.mockResolvedValue(new File(['guest'], 'guest-frame.jpg', { type: 'image/jpeg' }))
+  it("auto-scans one frame at a time and shows success cooldown", async () => {
+    captureGuestFrame.mockResolvedValue(new File(["guest"], "guest-frame.jpg", { type: "image/jpeg" }));
     submitGuestCheckin.mockResolvedValue({
-      checked_in_at: '2026-04-02T10:00:00Z',
-      employee_code: 'NV001',
-      full_name: 'Nguyen Van A',
-      snapshot_path: '/tmp/checkin.jpg',
-      status: 'recognized',
-    })
+      checked_in_at: "2026-04-02T10:00:00Z",
+      employee_code: "NV001",
+      full_name: "Nguyễn Văn A",
+      snapshot_path: "/tmp/checkin.jpg",
+      status: "recognized",
+    });
 
-    render(<GuestCheckinPage />)
-    fireEvent.click(screen.getByRole('button', { name: /bat dau quet/i }))
+    renderGuestPage();
 
-    expect(intervalCallbacks).toHaveLength(1)
+    expect(intervalCallbacks).toHaveLength(1);
 
     await act(async () => {
-      await intervalCallbacks[0]()
-    })
+      await intervalCallbacks[0]();
+    });
 
-    await waitFor(() => expect(submitGuestCheckin).toHaveBeenCalledTimes(1))
-    expect(captureGuestFrame).toHaveBeenCalledTimes(1)
-    expect(
-      screen.getByText(/diem danh thanh cong/i, { selector: '.guest-status-label' }),
-    ).toBeInTheDocument()
-    expect(screen.getByText(/NV001/i)).toBeInTheDocument()
-    expect(screen.getByText(/Nguyen Van A/i)).toBeInTheDocument()
-    expect(screen.getByText(/san sang quet lai sau 5 giay/i)).toBeInTheDocument()
-  })
+    await waitFor(() => expect(submitGuestCheckin).toHaveBeenCalledTimes(1));
+    expect(captureGuestFrame).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/điểm danh thành công/i)).toBeInTheDocument();
+    expect(screen.getByText(/NV001/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Nguyễn Văn A/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/tự động tiếp tục sau 5 giây/i).length).toBeGreaterThan(0);
+  });
 
-  it('prevents overlapping submissions while a request is in flight', async () => {
-    let resolveSubmit
+  it("prevents overlapping submissions while a request is in flight", async () => {
+    let resolveSubmit;
     const pendingSubmit = new Promise((resolve) => {
-      resolveSubmit = resolve
-    })
+      resolveSubmit = resolve;
+    });
 
-    captureGuestFrame.mockResolvedValue(new File(['guest'], 'guest-frame.jpg', { type: 'image/jpeg' }))
-    submitGuestCheckin.mockReturnValue(pendingSubmit)
+    captureGuestFrame.mockResolvedValue(new File(["guest"], "guest-frame.jpg", { type: "image/jpeg" }));
+    submitGuestCheckin.mockReturnValue(pendingSubmit);
 
-    render(<GuestCheckinPage />)
-    fireEvent.click(screen.getByRole('button', { name: /bat dau quet/i }))
-
-    await act(async () => {
-      await intervalCallbacks[0]()
-    })
-
-    expect(submitGuestCheckin).toHaveBeenCalledTimes(1)
+    renderGuestPage();
 
     await act(async () => {
-      await intervalCallbacks[0]()
-    })
+      await intervalCallbacks[0]();
+    });
 
-    expect(submitGuestCheckin).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('button', { name: /gui anh/i })).toBeDisabled()
+    expect(submitGuestCheckin).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      resolveSubmit({ status: 'no_face' })
-      await pendingSubmit
-    })
-  })
+      await intervalCallbacks[0]();
+    });
 
-  it('allows manual resume during cooldown', async () => {
-    captureGuestFrame.mockResolvedValue(new File(['guest'], 'guest-frame.jpg', { type: 'image/jpeg' }))
+    expect(submitGuestCheckin).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveSubmit({ status: "no_face" });
+      await pendingSubmit;
+    });
+  });
+
+  it("allows manual resume during cooldown", async () => {
+    captureGuestFrame.mockResolvedValue(new File(["guest"], "guest-frame.jpg", { type: "image/jpeg" }));
     submitGuestCheckin.mockResolvedValue({
-      checked_in_at: '2026-04-02T10:00:00Z',
-      employee_code: 'NV002',
-      full_name: 'Nguyen Van B',
-      snapshot_path: '/tmp/checkin-2.jpg',
-      status: 'recognized',
-    })
+      checked_in_at: "2026-04-02T10:00:00Z",
+      employee_code: "NV002",
+      full_name: "Nguyễn Văn B",
+      snapshot_path: "/tmp/checkin-2.jpg",
+      status: "recognized",
+    });
 
-    render(<GuestCheckinPage />)
-    fireEvent.click(screen.getByRole('button', { name: /bat dau quet/i }))
+    renderGuestPage();
 
     await act(async () => {
-      await intervalCallbacks[0]()
-    })
+      await intervalCallbacks[0]();
+    });
 
-    expect(screen.getByText(/san sang quet lai sau 5 giay/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /bat dau quet/i })).toBeEnabled()
+    expect(screen.getAllByText(/tự động tiếp tục sau 5 giây/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /bắt đầu quét/i })).toBeEnabled();
 
-    fireEvent.click(screen.getByRole('button', { name: /quet lai/i }))
+    fireEvent.click(screen.getByRole("button", { name: /bắt đầu quét/i }));
 
-    expect(screen.queryByText(/san sang quet lai sau 5 giay/i)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /tam dung/i })).toBeEnabled()
-  })
+    expect(screen.queryByText(/tự động tiếp tục sau 5 giây/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /dừng quét/i })).toBeEnabled();
+  });
 
-  it('renders an unavailable camera fallback state with retry and manual upload', () => {
-    cameraMode = 'unavailable'
+  it("renders an unavailable camera fallback state with retry and manual upload", async () => {
+    cameraMode = "unavailable";
 
-    render(<GuestCheckinPage />)
+    renderGuestPage();
 
-    expect(
-      screen.getByText(/khong tim thay camera phu hop tren thiet bi nay/i, {
-        selector: '.guest-status-text',
-      }),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /thu camera lai/i })).toBeInTheDocument()
-    expect(screen.getByLabelText(/tai anh check-in/i)).toBeInTheDocument()
-  })
+    expect(screen.getAllByText(/không tìm thấy camera phù hợp trên thiết bị này/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /thử lại camera/i })).toBeInTheDocument();
 
-  it('does not let manual fallback bypass the one-request-at-a-time guard', async () => {
-    const user = userEvent.setup()
-    let resolveSubmit
+    await userEvent.setup().click(screen.getByRole("button", { name: /tải ảnh thủ công/i }));
+    expect(screen.getByLabelText(/ảnh khuôn mặt/i)).toBeInTheDocument();
+  });
+
+  it("does not let manual fallback bypass the one-request-at-a-time guard", async () => {
+    const user = userEvent.setup();
+    let resolveSubmit;
     const pendingSubmit = new Promise((resolve) => {
-      resolveSubmit = resolve
-    })
+      resolveSubmit = resolve;
+    });
 
-    captureGuestFrame.mockResolvedValue(new File(['guest'], 'guest-frame.jpg', { type: 'image/jpeg' }))
-    submitGuestCheckin.mockReturnValue(pendingSubmit)
+    captureGuestFrame.mockResolvedValue(new File(["guest"], "guest-frame.jpg", { type: "image/jpeg" }));
+    submitGuestCheckin.mockReturnValue(pendingSubmit);
 
-    render(<GuestCheckinPage />)
+    renderGuestPage();
 
-    fireEvent.change(screen.getByLabelText(/tai anh check-in/i), {
-      target: { files: [new File(['guest'], 'fallback.jpg', { type: 'image/jpeg' })] },
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: /bat dau quet/i }))
-
-    await act(async () => {
-      await intervalCallbacks[0]()
-    })
-
-    expect(screen.getByRole('button', { name: /gui anh/i })).toBeDisabled()
-
-    await user.click(screen.getByRole('button', { name: /gui anh/i }))
-    expect(submitGuestCheckin).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole("button", { name: /tải ảnh thủ công/i }));
+    fireEvent.change(screen.getByLabelText(/ảnh khuôn mặt/i), {
+      target: { files: [new File(["guest"], "fallback.jpg", { type: "image/jpeg" })] },
+    });
 
     await act(async () => {
-      resolveSubmit({ status: 'no_face' })
-      await pendingSubmit
-    })
-  })
+      await intervalCallbacks[0]();
+    });
 
-  it('submits the fallback uploaded image when camera is unavailable', async () => {
-    const user = userEvent.setup()
-    cameraMode = 'unavailable'
+    expect(screen.getByRole("button", { name: /gửi ảnh lên ai/i })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: /gửi ảnh lên ai/i }));
+    expect(submitGuestCheckin).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveSubmit({ status: "no_face" });
+      await pendingSubmit;
+    });
+  });
+
+  it("submits the fallback uploaded image when camera is unavailable", async () => {
+    const user = userEvent.setup();
+    cameraMode = "unavailable";
     submitGuestCheckin.mockResolvedValue({
-      checked_in_at: '2026-04-02T10:00:00Z',
-      employee_code: 'NV002',
-      full_name: 'Nguyen Van B',
-      snapshot_path: '/tmp/checkin-2.jpg',
-      status: 'already_checked_in',
-    })
+      checked_in_at: "2026-04-02T10:00:00Z",
+      employee_code: "NV002",
+      full_name: "Nguyễn Văn B",
+      snapshot_path: "/tmp/checkin-2.jpg",
+      status: "already_checked_in",
+    });
 
-    render(<GuestCheckinPage />)
+    renderGuestPage();
 
-    const fileInput = screen.getByLabelText(/tai anh check-in/i)
-    const file = new File(['guest'], 'fallback.jpg', { type: 'image/jpeg' })
+    await user.click(screen.getByRole("button", { name: /tải ảnh thủ công/i }));
 
-    fireEvent.change(fileInput, { target: { files: [file] } })
-    await user.click(screen.getByRole('button', { name: /gui anh/i }))
+    const fileInput = screen.getByLabelText(/ảnh khuôn mặt/i);
+    const file = new File(["guest"], "fallback.jpg", { type: "image/jpeg" });
 
-    await waitFor(() => expect(submitGuestCheckin).toHaveBeenCalledTimes(1))
-    expect(submitGuestCheckin).toHaveBeenCalledWith(file)
-    expect(screen.getByText(/da diem danh/i, { selector: '.guest-status-label' })).toBeInTheDocument()
-  })
-})
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    await user.click(screen.getByRole("button", { name: /gửi ảnh lên ai/i }));
+
+    await waitFor(() => expect(submitGuestCheckin).toHaveBeenCalledTimes(1));
+    expect(submitGuestCheckin).toHaveBeenCalledWith(file);
+    expect(screen.getByText(/đã điểm danh/i)).toBeInTheDocument();
+  });
+});

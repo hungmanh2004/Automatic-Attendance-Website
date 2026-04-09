@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { useManagerAuth } from "../context/ManagerAuthContext";
 
@@ -7,50 +7,57 @@ const navItems = [
   {
     to: "/manager/dashboard",
     icon: "AI",
-    label: "Tong quan",
-    description: "KPI, trend va canh bao realtime",
+    label: "Tổng quan",
+    description: "KPI, xu hướng và cảnh báo thời gian thực",
   },
   {
     to: "/manager/employees",
     icon: "HR",
-    label: "Nhan vien",
-    description: "Ho so, hieu suat va khuon mat",
+    label: "Nhân viên",
+    description: "Hồ sơ, hiệu suất và khuôn mặt",
   },
   {
     to: "/manager/attendance",
     icon: "LOG",
-    label: "Cham cong",
-    description: "Lich su, bo loc va anh camera",
+    label: "Chấm công",
+    description: "Lịch sử, bộ lọc và ảnh camera",
   },
   {
     to: "/manager/reports",
     icon: "CSV",
-    label: "Bao cao",
-    description: "Xuat du lieu va thong ke ky",
+    label: "Báo cáo",
+    description: "Xuất dữ liệu và thống kê kỳ",
   },
 ];
 
 export default function ManagerLayout() {
   const { manager, logout } = useManagerAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     setMenuOpen(false);
   }, [location.pathname]);
 
+  async function handleLogout() {
+    await logout();
+    setMenuOpen(false);
+    navigate("/", { replace: true });
+  }
+
   return (
     <div className="manager-shell">
       <div className="manager-mobilebar">
         <div className="stack-sm">
-          <span className="section-label">Guardian AI Suite</span>
-          <strong>Attendance Command Center</strong>
+          <span className="section-label">Nền tảng Guardian AI</span>
+          <strong>Trung tâm điều phối chấm công</strong>
         </div>
 
         <button
           type="button"
           className="manager-menu-toggle"
-          aria-label={menuOpen ? "Dong menu" : "Mo menu"}
+          aria-label={menuOpen ? "Đóng menu" : "Mở menu"}
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((current) => !current)}
         >
@@ -60,21 +67,16 @@ export default function ManagerLayout() {
         </button>
       </div>
 
-      <button
-        type="button"
-        className={`manager-backdrop${menuOpen ? " is-open" : ""}`}
-        aria-label="Dong menu"
-        onClick={() => setMenuOpen(false)}
-      />
+      <button type="button" className={`manager-backdrop${menuOpen ? " is-open" : ""}`} aria-label="Đóng menu" onClick={() => setMenuOpen(false)} />
 
       <aside className={`manager-sidebar page-transition${menuOpen ? " is-open" : ""}`}>
         <div className="sidebar-brand">
-          <span className="section-label">Guardian AI Suite</span>
-          <h2>Attendance Command Center</h2>
-          <p>{manager?.username ? `Dang nhap voi ${manager.username}` : "Quan tri he thong cham cong AI doanh nghiep."}</p>
+          <span className="section-label">Nền tảng Guardian AI</span>
+          <h2>Trung tâm điều phối chấm công</h2>
+          <p>{manager?.username ? `Đăng nhập với ${manager.username}` : "Quản trị hệ thống chấm công AI doanh nghiệp."}</p>
         </div>
 
-        <nav className="manager-nav" aria-label="Manager navigation">
+        <nav className="manager-nav" aria-label="Điều hướng quản trị">
           {navItems.map((item) => (
             <NavLink key={item.to} to={item.to}>
               <span className="nav-icon">{item.icon}</span>
@@ -86,11 +88,11 @@ export default function ManagerLayout() {
           ))}
         </nav>
 
-        <button type="button" className="manager-logout" onClick={logout}>
+        <button type="button" className="manager-logout" onClick={() => void handleLogout()}>
           <span className="nav-icon">OUT</span>
           <span className="nav-copy">
-            <strong>Dang xuat</strong>
-            <span>Ket thuc phien quan tri hien tai</span>
+            <strong>Đăng xuất</strong>
+            <span>Kết thúc phiên quản trị hiện tại</span>
           </span>
         </button>
       </aside>

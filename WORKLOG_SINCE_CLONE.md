@@ -420,3 +420,165 @@ Tai khoan nay da duoc tao trong backend container dang chay.
 - Khu manager da duoc lam moi theo prompt Guardian AI.
 - Quy uoc lam viec hien tai:
   - Moi thay doi code ve sau deu phai duoc ghi them vao file `WORKLOG_SINCE_CLONE.md`.
+
+## Cap nhat CRUD nhan vien va sua tung anh khuon mat
+
+### File lien quan
+
+- `backend/app/routes/helpers.py`
+- `backend/app/routes/manager.py`
+- `backend/app/routes/face_enrollment.py`
+- `backend/tests/test_manager_api.py`
+- `backend/tests/test_manager_face_enrollment_api.py`
+- `frontend/src/lib/api.js`
+- `frontend/src/lib/errorMessages.js`
+- `frontend/src/pages/EmployeeListPage.jsx`
+- `frontend/src/pages/EmployeeFacesPage.jsx`
+- `frontend/src/pages/EmployeeListPage.test.jsx`
+- `frontend/src/pages/EmployeeFacesPage.test.jsx`
+- `frontend/src/styles.css`
+- `README.md`
+
+### Noi dung
+
+- Them API `PUT /api/manager/employees/<id>` de sua thong tin nhan vien.
+- Them API `DELETE /api/manager/employees/<id>` theo huong xoa mem:
+  - dat `is_active = false`
+  - xoa bo face samples dang co
+  - refresh face index de nhan vien bi xoa khong con duoc nhan dien
+- Them API `GET /api/manager/employees/<id>/face-samples/<sample_index>/image` de frontend preview dung anh trong tung slot.
+- Them API `PUT /api/manager/employees/<id>/face-samples/<sample_index>` de thay rieng 1 anh trong bo 5 anh khuon mat.
+- Frontend trang nhan vien hien co:
+  - sua inline trong bang
+  - xoa nhan vien ngay tren bang
+  - an nhan vien da bi xoa mem khoi danh sach thao tac chinh
+- Frontend trang khuon mat hien co:
+  - thumbnail tung slot
+  - nut thay rieng moi slot
+  - van giu luong dang ky moi du 5 anh va xoa ca bo khi can
+- README da duoc viet lai sach ma hoa va bo sung cac API moi.
+
+### Kiem tra bo sung
+
+- Bo sung test backend cho:
+  - sua nhan vien
+  - xoa mem nhan vien
+  - xem anh face sample
+  - thay 1 face sample
+- Cap nhat test frontend cho:
+  - tao/sua/xoa nhan vien
+  - thay rieng 1 anh khuon mat
+
+## Cap nhat bang nhan vien va bo loc cham cong theo phong ban/chuc vu
+
+### File lien quan
+
+- `backend/app/models.py`
+- `backend/app/__init__.py`
+- `backend/app/services/auth.py`
+- `backend/app/services/attendance.py`
+- `backend/app/routes/manager.py`
+- `backend/tests/test_manager_api.py`
+- `backend/tests/test_manager_attendance_api.py`
+- `frontend/src/lib/attendanceApi.js`
+- `frontend/src/pages/EmployeeListPage.jsx`
+- `frontend/src/pages/AttendancePage.jsx`
+- `frontend/src/pages/EmployeeListPage.test.jsx`
+- `frontend/src/pages/AttendancePage.test.jsx`
+- `README.md`
+
+### Noi dung
+
+- Them truong `department` cho model `Employee` va schema update nhe cho database cu.
+- Dong bo `department` qua serializer, API tao nhan vien va API sua nhan vien.
+- Bang nhan vien duoc tach ro cac cot:
+  - Ho ten nhan vien
+  - Ma nhan vien
+  - Phong ban
+  - Chuc vu
+  - Cac thong ke co ban van duoc giu nguyen
+- Form tao/sua nhan vien hien nhap du ca `Phong ban` va `Chuc vu`.
+- Attendance API nhan them query `department` va `position` de loc ngay tu backend.
+- Trang cham cong them 2 bo loc moi:
+  - phong ban
+  - chuc vu
+- Danh sach chuc vu tren trang cham cong duoc gioi han theo phong ban dang chon de bo loc gon hon.
+- Bang lich su cham cong hien them cot `Phong ban` va `Chuc vu`.
+
+### Kiem tra bo sung
+
+- Bo sung test backend cho:
+  - luu `department` khi tao/sua nhan vien
+  - loc attendance theo `department` va `position`
+- Cap nhat test frontend cho:
+  - tao/sua nhan vien voi `Phong ban` va `Chuc vu`
+  - bo loc attendance theo `Phong ban` va `Chuc vu`
+
+## Viet hoa trang guest va dieu huong logout ve trang quet khuon mat
+
+### File lien quan
+
+- `frontend/src/components/ManagerLayout.jsx`
+- `frontend/src/pages/GuestCheckinPage.jsx`
+- `frontend/src/pages/GuestCheckinPage.test.jsx`
+- `WORKLOG_SINCE_CLONE.md`
+
+### Noi dung
+
+- Doi cac nhan chinh tren trang guest sang tieng Viet co dau.
+- Giu nguyen luong quet khuon mat, chi doi tieu de, thong diep va nhan hien thi.
+- Nut `Dang xuat` trong khu manager nay se logout roi dieu huong thang ve `/`, tuc trang chu quet khuon mat.
+
+## Viet hoa trang tong quan
+
+### File lien quan
+
+- `frontend/src/pages/DashboardPage.jsx`
+- `WORKLOG_SINCE_CLONE.md`
+
+### Noi dung
+
+- Doi toan bo text chinh tren trang tong quan sang tieng Viet co dau.
+- Viet hoa cac KPI, nhan the thong ke, canh bao AI va empty state.
+- Doi thu trong tuan tren bieu do sang dang viet tat tieng Viet.
+- Doi nhan trang thai check-in hien thi tren dashboard tu `On-time` / `Late` sang `Dung gio` / `Di muon`.
+
+## Viet hoa dong bo toan bo giao dien frontend
+
+### File lien quan
+
+- `frontend/src/components/ManagerLayout.jsx`
+- `frontend/src/components/ProtectedRoute.jsx`
+- `frontend/src/hooks/useGuestCamera.js`
+- `frontend/src/pages/ManagerLoginPage.jsx`
+- `frontend/src/pages/AttendancePage.jsx`
+- `frontend/src/pages/EmployeeListPage.jsx`
+- `frontend/src/pages/EmployeeFacesPage.jsx`
+- `frontend/src/pages/ReportsPage.jsx`
+- `frontend/src/pages/GuestCheckinPage.jsx`
+- `frontend/src/pages/LandingPage.jsx`
+- `frontend/src/App.test.jsx`
+- `frontend/src/App.attendance.test.jsx`
+- `frontend/src/pages/ManagerLoginPage.test.jsx`
+- `frontend/src/pages/AttendancePage.test.jsx`
+- `frontend/src/pages/EmployeeListPage.test.jsx`
+- `frontend/src/pages/EmployeeFacesPage.test.jsx`
+- `frontend/src/components/ManagerLayout.test.jsx`
+
+### Noi dung
+
+- Ra soat lai cac trang frontend va doi cac text con tieng Anh, khong dau hoac loi ma hoa sang tieng Viet co dau.
+- Dong bo lai nhan tren cac man:
+  - dang nhap quan tri
+  - tong quan
+  - nhan vien
+  - khuon mat nhan vien
+  - cham cong
+  - bao cao
+  - trang chu quet khuon mat
+- Doi them mot so nhan he thong de de hieu hon:
+  - `On-time` -> `Dung gio`
+  - `Late` -> `Di muon`
+  - `snapshot` -> `anh chup`
+  - `confidence` -> `do khop`
+- Cap nhat lai test frontend de khop voi text va luong dieu huong moi.

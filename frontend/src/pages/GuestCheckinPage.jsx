@@ -19,9 +19,9 @@ function getTone(status) {
 }
 
 function getStatusLabel(cameraState, scanMode) {
-  if (cameraState !== "ready") return "Camera Error";
-  if (scanMode === "paused") return "Paused";
-  return "Scanning Active";
+  if (cameraState !== "ready") return "Lỗi camera";
+  if (scanMode === "paused") return "Tạm dừng";
+  return "Đang quét";
 }
 
 function getConfidenceValue(distance) {
@@ -47,7 +47,7 @@ function formatTime(value) {
 
 function formatDateTime(value) {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Dang cho du lieu";
+  if (Number.isNaN(date.getTime())) return "Đang chờ dữ liệu";
   return `${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · ${date.toLocaleDateString()}`;
 }
 
@@ -66,7 +66,7 @@ export default function GuestCheckinPage() {
   const [history, setHistory] = useState([]);
   const [manualFile, setManualFile] = useState(null);
   const [showFallback, setShowFallback] = useState(false);
-  const [statusText, setStatusText] = useState("AI dang quet khuon mat realtime.");
+  const [statusText, setStatusText] = useState("AI đang quét khuôn mặt theo thời gian thực.");
   const inflightRef = useRef(false);
 
   const isScanning = scanMode === "scanning" && cooldownSeconds === 0;
@@ -99,17 +99,17 @@ export default function GuestCheckinPage() {
 
   useEffect(() => {
     if (!cameraReady) {
-      setStatusText(cameraError || "Camera offline. Kiem tra quyen truy cap hoac thiet bi.");
+      setStatusText(cameraError || "Camera đang ngoại tuyến. Hãy kiểm tra quyền truy cập hoặc thiết bị.");
       return;
     }
 
     if (isPaused && cooldownSeconds > 0) {
-      setStatusText(`AI tam dung. Tu dong tiep tuc sau ${cooldownSeconds}s.`);
+      setStatusText(`AI đang tạm dừng. Tự động tiếp tục sau ${cooldownSeconds} giây.`);
       return;
     }
 
     if (isPaused) {
-      setStatusText("He thong dang tam dung, an Bat dau quet de tiep tuc.");
+      setStatusText("Hệ thống đang tạm dừng, nhấn Bắt đầu quét để tiếp tục.");
       return;
     }
 
@@ -118,7 +118,7 @@ export default function GuestCheckinPage() {
       return;
     }
 
-    setStatusText("AI dang quet khuon mat realtime.");
+    setStatusText("AI đang quét khuôn mặt theo thời gian thực.");
   }, [cameraError, cameraReady, cooldownSeconds, isPaused, result]);
 
   function pushHistory(payload) {
@@ -126,7 +126,7 @@ export default function GuestCheckinPage() {
     const entry = {
       id: `${Date.now()}-${Math.random()}`,
       status: payload?.status || "unknown",
-      full_name: payload?.full_name || "Nguoi la / khong xac dinh",
+      full_name: payload?.full_name || "Người lạ / chưa xác định",
       checked_in_at: payload?.checked_in_at || new Date().toISOString(),
       confidence,
     };
@@ -138,6 +138,7 @@ export default function GuestCheckinPage() {
     setResult(payload);
     pushHistory(payload);
 
+    // Pause briefly after a successful match to avoid duplicate scans from the same person.
     if (payload?.status === "recognized" || payload?.status === "already_checked_in") {
       setScanMode("paused");
       setCooldownSeconds(SUCCESS_COOLDOWN_SECONDS);
@@ -155,7 +156,7 @@ export default function GuestCheckinPage() {
       if (!frame) {
         applyResult({
           status: "no_face",
-          message: "Khong phat hien khuon mat trong khung scan.",
+          message: "Không phát hiện khuôn mặt trong khung quét.",
           checked_in_at: new Date().toISOString(),
         });
         return;
@@ -166,7 +167,7 @@ export default function GuestCheckinPage() {
     } catch (error) {
       applyResult({
         status: "network_error",
-        message: getFriendlyBackendErrorMessage(error, "Khong the gui du lieu den backend."),
+        message: getFriendlyBackendErrorMessage(error, "Không thể gửi dữ liệu đến backend."),
         checked_in_at: new Date().toISOString(),
       });
     } finally {
@@ -186,7 +187,7 @@ export default function GuestCheckinPage() {
     } catch (error) {
       applyResult({
         status: "network_error",
-        message: getFriendlyBackendErrorMessage(error, "Khong the gui anh thu cong den backend."),
+        message: getFriendlyBackendErrorMessage(error, "Không thể gửi ảnh thủ công đến backend."),
         checked_in_at: new Date().toISOString(),
       });
     } finally {
@@ -197,24 +198,24 @@ export default function GuestCheckinPage() {
   const confidence = getConfidenceValue(result?.distance);
   const confidenceStroke = 339.292;
   const confidenceOffset = confidenceStroke - (confidence / 100) * confidenceStroke;
-  const recentPersonName = result?.full_name || "Dang cho AI xac nhan";
+  const recentPersonName = result?.full_name || "Đang chờ AI xác nhận";
 
   return (
     <main className="kiosk-shell page-transition">
       <section className="kiosk-topbar">
         <div className="stack-sm">
-          <span className="section-label">Guardian AI Kiosk</span>
-          <h1>Smart Attendance Scanner</h1>
+          <span className="section-label">Trạm quét Guardian AI</span>
+          <h1>Điểm danh khuôn mặt thông minh</h1>
           <p className="text-secondary">
-            He thong nhan dien khuon mat enterprise-grade voi camera realtime, overlay AI va nhat ky cap nhat lien tuc.
+            Hệ thống nhận diện khuôn mặt với camera thời gian thực, lớp phủ AI và nhật ký cập nhật liên tục.
           </p>
         </div>
 
         <div className="kiosk-actions">
           <Link className="btn btn-secondary" to="/manager/login">
-            Mo khu quan tri
+            Mở khu quản trị
           </Link>
-          <span className={`kiosk-live-pill tone-${getTone(cameraReady ? scanMode === "paused" ? "paused" : "recognized" : "network_error")}`}>
+          <span className={`kiosk-live-pill tone-${getTone(cameraReady ? (scanMode === "paused" ? "paused" : "recognized") : "network_error")}`}>
             {getStatusLabel(cameraState, scanMode)}
           </span>
         </div>
@@ -238,17 +239,17 @@ export default function GuestCheckinPage() {
               </div>
               {!cameraReady ? (
                 <div className="overlay-message">
-                  <strong>Loi camera</strong>
-                  <p>{cameraError || "Khong ket noi duoc camera."}</p>
+                  <strong>Lỗi camera</strong>
+                  <p>{cameraError || "Không kết nối được camera."}</p>
                   <button type="button" className="btn btn-secondary btn-sm" onClick={retryCamera}>
-                    Thu lai camera
+                    Thử lại camera
                   </button>
                 </div>
               ) : null}
               {isPaused ? (
                 <div className="overlay-message">
-                  <strong>Tam dung AI scanner</strong>
-                  <p>{cooldownSeconds > 0 ? `Tu dong tiep tuc sau ${cooldownSeconds} giay.` : "Nhan Bat dau quet de tiep tuc."}</p>
+                  <strong>Tạm dừng bộ quét AI</strong>
+                  <p>{cooldownSeconds > 0 ? `Tự động tiếp tục sau ${cooldownSeconds} giây.` : "Nhấn Bắt đầu quét để tiếp tục."}</p>
                 </div>
               ) : null}
             </div>
@@ -256,8 +257,8 @@ export default function GuestCheckinPage() {
 
           <div className="kiosk-toolbar">
             <div className="stack-sm">
-              <span className="section-label">Scan Control</span>
-              <strong>{isPaused ? "Camera dang tam dung" : "Camera dang quet lien tuc"}</strong>
+              <span className="section-label">Điều khiển quét</span>
+              <strong>{isPaused ? "Camera đang tạm dừng" : "Camera đang quét liên tục"}</strong>
             </div>
 
             <div className="kiosk-toolbar-actions">
@@ -271,7 +272,7 @@ export default function GuestCheckinPage() {
                   }}
                   disabled={!cameraReady || isBusy}
                 >
-                  Bat dau quet
+                  Bắt đầu quét
                 </button>
               ) : (
                 <button
@@ -280,7 +281,7 @@ export default function GuestCheckinPage() {
                   onClick={() => setScanMode("paused")}
                   disabled={!cameraReady || isBusy}
                 >
-                  Dung quet
+                  Dừng quét
                 </button>
               )}
             </div>
@@ -291,11 +292,11 @@ export default function GuestCheckinPage() {
           <div className="glass-panel kiosk-result-card">
             <div className="row-between">
               <div className="stack-sm">
-                <span className="section-label">AI Result</span>
-                <h2>Nguoi vua quet</h2>
+                <span className="section-label">Kết quả AI</span>
+                <h2>Người vừa quét</h2>
               </div>
               <span className={`badge badge-${getTone(result?.status) === "success" ? "success" : getTone(result?.status) === "warning" ? "warning" : getTone(result?.status) === "danger" ? "error" : "info"}`}>
-                {copy?.label || "Dang quet"}
+                {copy?.label || "Đang quét"}
               </span>
             </div>
 
@@ -303,7 +304,7 @@ export default function GuestCheckinPage() {
               <div className="kiosk-avatar">{getEmployeeInitials(recentPersonName)}</div>
               <div className="stack-sm">
                 <strong>{recentPersonName}</strong>
-                <span className="text-secondary">{result?.employee_code || "Guardian AI Visitor Stream"}</span>
+                <span className="text-secondary">{result?.employee_code || "Luồng khách Guardian AI"}</span>
                 <span className="text-muted">{formatDateTime(result?.checked_in_at)}</span>
               </div>
             </div>
@@ -322,23 +323,23 @@ export default function GuestCheckinPage() {
                 </svg>
                 <div>
                   <strong>{confidence.toFixed(1)}%</strong>
-                  <span>Match</span>
+                  <span>Khớp</span>
                 </div>
               </div>
 
               <div className="stack-sm">
-                <div className="pill">{cameraReady ? "AI online" : "Camera offline"}</div>
+                <div className="pill">{cameraReady ? "AI trực tuyến" : "Camera ngoại tuyến"}</div>
                 <p className="text-secondary">{statusText}</p>
               </div>
             </div>
 
             <div className="kiosk-meta-grid">
               <div className="kiosk-meta">
-                <span>Trang thai</span>
+                <span>Trạng thái</span>
                 <strong>{getStatusLabel(cameraState, scanMode)}</strong>
               </div>
               <div className="kiosk-meta">
-                <span>Check-in</span>
+                <span>Điểm danh</span>
                 <strong>{formatTime(result?.checked_in_at)}</strong>
               </div>
               <div className="kiosk-meta">
@@ -346,8 +347,8 @@ export default function GuestCheckinPage() {
                 <strong>{cameraState}</strong>
               </div>
               <div className="kiosk-meta">
-                <span>AI note</span>
-                <strong>{copy?.message || "Dang cho du lieu moi"}</strong>
+                <span>Ghi chú AI</span>
+                <strong>{copy?.message || "Đang chờ dữ liệu mới"}</strong>
               </div>
             </div>
           </div>
@@ -355,17 +356,17 @@ export default function GuestCheckinPage() {
           <div className="glass-panel kiosk-history-card">
             <div className="row-between">
               <div className="stack-sm">
-                <span className="section-label">Recent Logs</span>
-                <h2>Lich su gan nhat</h2>
+                <span className="section-label">Lượt quét gần đây</span>
+                <h2>Lịch sử gần nhất</h2>
               </div>
-              <span className="pill">{history.length} ban ghi</span>
+              <span className="pill">{history.length} bản ghi</span>
             </div>
 
             <div className="kiosk-history-list">
               {history.length === 0 ? (
                 <div className="empty-state">
-                  <h3>Chua co log</h3>
-                  <p>AI se cap nhat danh sach nay ngay khi co luot scan moi.</p>
+                  <h3>Chưa có log</h3>
+                  <p>AI sẽ cập nhật danh sách này ngay khi có lượt quét mới.</p>
                 </div>
               ) : (
                 history.map((entry) => (
@@ -385,13 +386,13 @@ export default function GuestCheckinPage() {
             </div>
 
             <button type="button" className="btn btn-ghost" onClick={() => setShowFallback((current) => !current)}>
-              {showFallback ? "Dong tai anh thu cong" : "Camera loi? Tai anh thu cong"}
+              {showFallback ? "Đóng tải ảnh thủ công" : "Camera lỗi? Tải ảnh thủ công"}
             </button>
 
             {showFallback ? (
               <form className="kiosk-upload-panel" onSubmit={handleManualSubmit}>
                 <div className="field">
-                  <label htmlFor="manual-upload">Anh khuon mat</label>
+                  <label htmlFor="manual-upload">Ảnh khuôn mặt</label>
                   <input
                     id="manual-upload"
                     type="file"
@@ -400,7 +401,7 @@ export default function GuestCheckinPage() {
                   />
                 </div>
                 <button type="submit" className="btn btn-primary" disabled={!manualFile || isBusy}>
-                  Gui anh len AI
+                  Gửi ảnh lên AI
                 </button>
               </form>
             ) : null}

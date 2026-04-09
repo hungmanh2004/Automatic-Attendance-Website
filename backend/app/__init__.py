@@ -44,6 +44,16 @@ def _initialize_database(app):
 def _run_schema_updates():
     inspector = inspect(db.engine)
     employee_columns = {column["name"] for column in inspector.get_columns("employees")}
+    if "department" not in employee_columns:
+        try:
+            db.session.execute(text("ALTER TABLE employees ADD COLUMN department VARCHAR(255) DEFAULT 'Văn phòng'"))
+        except OperationalError as error:
+            if "duplicate column name: department" not in str(error):
+                raise
+            db.session.rollback()
+        db.session.execute(text("UPDATE employees SET department = 'Văn phòng' WHERE department IS NULL"))
+        db.session.commit()
+
     if "position" not in employee_columns:
         try:
             db.session.execute(text("ALTER TABLE employees ADD COLUMN position VARCHAR(255) DEFAULT 'Nhan vien'"))

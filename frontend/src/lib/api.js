@@ -107,6 +107,19 @@ export function createEmployee(employeeOrCode, fullName, position) {
   })
 }
 
+export function updateEmployee(employeeId, employee) {
+  return apiRequest(`/api/manager/employees/${employeeId}`, {
+    body: employee,
+    method: 'PUT',
+  })
+}
+
+export function deleteEmployee(employeeId) {
+  return apiRequest(`/api/manager/employees/${employeeId}`, {
+    method: 'DELETE',
+  })
+}
+
 export function fetchEmployeeFaceSamples(employeeId) {
   return apiRequest(`/api/manager/employees/${employeeId}/face-samples`)
 }
@@ -136,6 +149,16 @@ export const enrollFaceSamples = enrollEmployeeFaces
 export function deleteEmployeeFaceSamples(employeeId) {
   return apiRequest(`/api/manager/employees/${employeeId}/face-samples`, {
     method: 'DELETE',
+  })
+}
+
+export function replaceEmployeeFaceSample(employeeId, sampleIndex, file) {
+  const formData = new FormData()
+  formData.append('image', file, file?.name || `sample-${sampleIndex}.jpg`)
+
+  return apiRequest(`/api/manager/employees/${employeeId}/face-samples/${sampleIndex}`, {
+    body: formData,
+    method: 'PUT',
   })
 }
 

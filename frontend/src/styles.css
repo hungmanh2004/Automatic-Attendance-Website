@@ -650,11 +650,37 @@ label {
   gap: 20px;
 }
 
+.employee-shell .employee-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .employee-table-panel,
 .employee-create-panel {
   display: grid;
   gap: 20px;
   padding: 24px;
+}
+
+.employee-shell .employee-table-panel {
+  overflow: hidden;
+}
+
+.employee-shell .employee-create-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.employee-shell .employee-create-panel .field-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.employee-shell .employee-create-panel .field-group .field {
+  min-width: 0;
+}
+
+.employee-shell .employee-create-panel .field-group > .btn {
+  grid-column: 1 / -1;
 }
 
 .employee-toolbar {
@@ -706,6 +732,144 @@ label {
 .face-slot.is-filled {
   border-style: solid;
   background: linear-gradient(180deg, rgba(46, 120, 255, 0.14), rgba(188, 168, 255, 0.14));
+}
+
+.face-thumb,
+.face-thumb-placeholder {
+  width: 100%;
+  max-width: 132px;
+  aspect-ratio: 1;
+  border-radius: 18px;
+}
+
+.face-thumb {
+  object-fit: cover;
+  border: 1px solid rgba(120, 145, 209, 0.22);
+  box-shadow: var(--shadow-soft);
+}
+
+.face-thumb-placeholder {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.56);
+  border: 1px dashed rgba(118, 145, 209, 0.26);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.employee-shell .table-scroll {
+  max-height: min(68vh, 820px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-radius: 20px;
+  border: 1px solid rgba(120, 145, 209, 0.16);
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.employee-shell .data-table {
+  table-layout: fixed;
+}
+
+.employee-shell .data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(243, 247, 255, 0.96);
+  backdrop-filter: blur(10px);
+}
+
+.employee-shell .data-table th,
+.employee-shell .data-table td {
+  padding: 12px 10px;
+  vertical-align: middle;
+  font-size: 13px;
+}
+
+.employee-shell .data-table th:nth-child(1),
+.employee-shell .data-table td:nth-child(1) {
+  width: 22%;
+}
+
+.employee-shell .data-table th:nth-child(2),
+.employee-shell .data-table td:nth-child(2) {
+  width: 11%;
+}
+
+.employee-shell .data-table th:nth-child(3),
+.employee-shell .data-table td:nth-child(3) {
+  width: 11%;
+}
+
+.employee-shell .data-table th:nth-child(4),
+.employee-shell .data-table td:nth-child(4),
+.employee-shell .data-table th:nth-child(5),
+.employee-shell .data-table td:nth-child(5),
+.employee-shell .data-table th:nth-child(6),
+.employee-shell .data-table td:nth-child(6),
+.employee-shell .data-table th:nth-child(7),
+.employee-shell .data-table td:nth-child(7) {
+  width: 6%;
+}
+
+.employee-shell .data-table th:nth-child(8),
+.employee-shell .data-table td:nth-child(8) {
+  width: 10%;
+}
+
+.employee-shell .data-table th:nth-child(9),
+.employee-shell .data-table td:nth-child(9) {
+  width: 8%;
+}
+
+.employee-shell .data-table th:nth-child(10),
+.employee-shell .data-table td:nth-child(10) {
+  width: 14%;
+}
+
+.employee-shell .employee-name-cell {
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.employee-shell .employee-avatar {
+  width: 36px;
+  height: 36px;
+  font-size: 12px;
+}
+
+.employee-shell .employee-name-cell strong,
+.employee-shell .data-table td,
+.employee-shell .data-table td span,
+.employee-shell .data-table td a,
+.employee-shell .data-table td button {
+  overflow-wrap: anywhere;
+}
+
+.employee-shell .employee-name-cell strong {
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.employee-shell .text-secondary {
+  font-size: 12px;
+}
+
+.employee-shell .btn.btn-sm {
+  min-height: 34px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.employee-shell .row-actions {
+  justify-content: flex-start;
+  gap: 6px;
 }
 
 .report-actions {
@@ -842,6 +1006,24 @@ label {
   .employee-filters,
   .face-grid {
     grid-template-columns: 1fr;
+  }
+
+  .employee-shell .employee-create-panel .field-group {
+    grid-template-columns: 1fr;
+  }
+
+  .employee-shell .table-scroll {
+    overflow-x: auto;
+    overflow-y: visible;
+    max-height: none;
+  }
+
+  .employee-shell .data-table {
+    table-layout: auto;
+  }
+
+  .employee-shell .data-table thead th {
+    position: static;
   }
 
   .manager-sidebar {

@@ -2,12 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useManagerAuth } from "../context/ManagerAuthContext";
-import { createEmployee, fetchDashboardSummary, getEmployees } from "../lib/api";
+import { createEmployee, deleteEmployee, fetchDashboardSummary, getEmployees, updateEmployee } from "../lib/api";
 import { getFriendlyErrorMessage } from "../lib/errorMessages";
-
-function buildDepartment(employee) {
-  return employee.position || "Nhan vien";
-}
 
 function getPerformance(employee) {
   const worked = employee.total_days_worked || 0;
@@ -18,9 +14,9 @@ function getPerformance(employee) {
 
 function getStatus(employee) {
   const performance = getPerformance(employee);
-  if (performance >= 85) return { label: "Tot", tone: "success" };
-  if (performance >= 60) return { label: "Canh bao", tone: "warning" };
-  return { label: "Van de", tone: "error" };
+  if (performance >= 85) return { label: "Tốt", tone: "success" };
+  if (performance >= 60) return { label: "Cảnh báo", tone: "warning" };
+  return { label: "Vấn đề", tone: "error" };
 }
 
 export default function EmployeeListPage() {
@@ -32,10 +28,17 @@ export default function EmployeeListPage() {
   const [messageType, setMessageType] = useState("info");
   const [code, setCode] = useState("");
   const [fullName, setFullName] = useState("");
+  const [departmentName, setDepartmentName] = useState("");
   const [position, setPosition] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState("");
   const [department, setDepartment] = useState("all");
+  const [editingId, setEditingId] = useState(null);
+  const [editCode, setEditCode] = useState("");
+  const [editFullName, setEditFullName] = useState("");
+  const [editDepartmentName, setEditDepartmentName] = useState("");
+  const [editPosition, setEditPosition] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
 
   async function loadEmployees() {
     setLoading(true);
@@ -55,7 +58,7 @@ export default function EmployeeListPage() {
         navigate("/manager/login", { replace: true });
         return;
       }
-      setMessage(error.message || "Khong the tai danh sach nhan vien.");
+      setMessage(error.message || "Không thể tải danh sách nhân viên.");
       setMessageType("error");
     } finally {
       setLoading(false);
@@ -64,7 +67,6 @@ export default function EmployeeListPage() {
 
   useEffect(() => {
     void loadEmployees();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleSubmit(event) {
@@ -76,13 +78,15 @@ export default function EmployeeListPage() {
       await createEmployee({
         employee_code: code.trim(),
         full_name: fullName.trim(),
+        department: departmentName.trim(),
         position: position.trim(),
       });
       setCode("");
       setFullName("");
+      setDepartmentName("");
       setPosition("");
       await loadEmployees();
-      setMessage("Da them nhan vien moi vao he thong.");
+      setMessage("Đã thêm nhân viên mới vào hệ thống.");
       setMessageType("success");
     } catch (error) {
       if (error.status === 401) {
@@ -90,39 +94,117 @@ export default function EmployeeListPage() {
         navigate("/manager/login", { replace: true });
         return;
       }
-      setMessage(getFriendlyErrorMessage(error, "Khong the tao nhan vien moi."));
+      setMessage(getFriendlyErrorMessage(error, "Không thể tạo nhân viên mới."));
       setMessageType("error");
     } finally {
       setSubmitting(false);
     }
   }
 
+  function startEdit(employee) {
+    setEditingId(employee.id);
+    setEditCode(employee.employee_code || "");
+    setEditFullName(employee.full_name || "");
+    setEditDepartmentName(employee.department || "");
+    setEditPosition(employee.position || "");
+    setMessage("");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditCode("");
+    setEditFullName("");
+    setEditDepartmentName("");
+    setEditPosition("");
+  }
+
+  async function handleUpdate(employeeId) {
+    setActionLoading(true);
+    setMessage("");
+
+    try {
+      await updateEmployee(employeeId, {
+        employee_code: editCode.trim(),
+        full_name: editFullName.trim(),
+        department: editDepartmentName.trim(),
+        position: editPosition.trim(),
+      });
+      cancelEdit();
+      await loadEmployees();
+      setMessage("Đã cập nhật nhân viên.");
+      setMessageType("success");
+    } catch (error) {
+      if (error.status === 401) {
+        setUnauthenticated();
+        navigate("/manager/login", { replace: true });
+        return;
+      }
+      setMessage(getFriendlyErrorMessage(error, "Không thể cập nhật nhân viên."));
+      setMessageType("error");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleDelete(employeeId) {
+    const confirmed = window.confirm("Bạn có chắc muốn xóa nhân viên này?");
+    if (!confirmed) return;
+
+    setActionLoading(true);
+    setMessage("");
+
+    try {
+      await deleteEmployee(employeeId);
+      if (editingId === employeeId) {
+        cancelEdit();
+      }
+      await loadEmployees();
+      setMessage("Đã xóa nhân viên và vô hiệu hóa dữ liệu nhận diện.");
+      setMessageType("success");
+    } catch (error) {
+      if (error.status === 401) {
+        setUnauthenticated();
+        navigate("/manager/login", { replace: true });
+        return;
+      }
+      setMessage(getFriendlyErrorMessage(error, "Không thể xóa nhân viên."));
+      setMessageType("error");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  const activeEmployees = useMemo(() => employees.filter((employee) => employee.is_active !== false), [employees]);
+
   const departments = useMemo(() => {
-    const values = new Set(employees.map((employee) => buildDepartment(employee)));
+    const values = new Set(activeEmployees.map((employee) => employee.department || "Văn phòng"));
     return ["all", ...values];
-  }, [employees]);
+  }, [activeEmployees]);
+
+  const positions = useMemo(() => {
+    const values = new Set(activeEmployees.map((employee) => employee.position || "Nhân viên"));
+    return values;
+  }, [activeEmployees]);
 
   const filteredEmployees = useMemo(() => {
     const normalized = search.trim().toLowerCase();
-    return employees.filter((employee) => {
+    return activeEmployees.filter((employee) => {
       const matchSearch =
         !normalized ||
         employee.full_name?.toLowerCase().includes(normalized) ||
         employee.employee_code?.toLowerCase().includes(normalized);
-      const matchDepartment = department === "all" || buildDepartment(employee) === department;
+      const matchDepartment = department === "all" || (employee.department || "Văn phòng") === department;
       return matchSearch && matchDepartment;
     });
-  }, [department, employees, search]);
+  }, [activeEmployees, department, search]);
 
   return (
     <div className="page-shell employee-shell">
       <div className="page-header">
         <div className="page-header-info">
-          <span className="section-label">Employee Intelligence</span>
-          <h1>Quan ly nhan vien, hieu suat va du lieu khuon mat</h1>
-          <p className="text-secondary">
-            Search, filter, quan sat hieu suat thang va truy cap nhanh luong dang ky khuon mat cho tung nhan vien.
-          </p>
+          <span className="section-label">Phân tích nhân sự</span>
+          <h1>Quản lý nhân viên, hiệu suất và dữ liệu khuôn mặt</h1>
+          <p className="text-secondary">Tìm kiếm, lọc, quan sát hiệu suất tháng và truy cập nhanh luồng đăng ký khuôn mặt cho từng nhân viên.</p>
         </div>
       </div>
 
@@ -132,16 +214,16 @@ export default function EmployeeListPage() {
         <article className="glass-panel employee-table-panel">
           <div className="row-between employee-toolbar">
             <div className="stack-sm">
-              <span className="section-label">Directory</span>
-              <h2>Bang nhan vien nang cao</h2>
+              <span className="section-label">Danh bạ nhân viên</span>
+              <h2>Bảng nhân viên nâng cao</h2>
             </div>
 
             <div className="employee-filters">
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search ten hoac ma NV" />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tìm tên hoặc mã nhân viên" />
               <select value={department} onChange={(event) => setDepartment(event.target.value)}>
                 {departments.map((option) => (
                   <option key={option} value={option}>
-                    {option === "all" ? "Tat ca phong ban" : option}
+                    {option === "all" ? "Tất cả phòng ban" : option}
                   </option>
                 ))}
               </select>
@@ -151,26 +233,27 @@ export default function EmployeeListPage() {
           {loading ? (
             <div className="loading-row">
               <div className="spinner" />
-              Dang tai bang nhan vien...
+              Đang tải bảng nhân viên...
             </div>
           ) : filteredEmployees.length === 0 ? (
             <div className="empty-state">
-              <h3>Khong tim thay nhan vien</h3>
-              <p>Thu doi tu khoa tim kiem hoac bo loc phong ban.</p>
+              <h3>Không tìm thấy nhân viên</h3>
+              <p>Thử đổi từ khóa tìm kiếm hoặc bộ lọc phòng ban.</p>
             </div>
           ) : (
             <div className="table-scroll">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Nhan vien</th>
-                    <th>Phong ban</th>
-                    <th>Tong ngay</th>
-                    <th>On-time</th>
-                    <th>Late</th>
-                    <th>Vang</th>
-                    <th>Hieu suat</th>
-                    <th>Trang thai</th>
+                    <th>Nhân viên</th>
+                    <th>Phòng ban</th>
+                    <th>Chức vụ</th>
+                    <th>Tổng ngày</th>
+                    <th>Đúng giờ</th>
+                    <th>Đi muộn</th>
+                    <th>Vắng</th>
+                    <th>Hiệu suất</th>
+                    <th>Trạng thái</th>
                     <th />
                   </tr>
                 </thead>
@@ -181,15 +264,41 @@ export default function EmployeeListPage() {
                     return (
                       <tr key={employee.id}>
                         <td>
-                          <div className="employee-name-cell">
-                            <div className="employee-avatar">{employee.full_name?.slice(0, 2)?.toUpperCase() || "AI"}</div>
+                          {editingId === employee.id ? (
                             <div className="stack-sm">
-                              <strong>{employee.full_name}</strong>
-                              <span className="text-secondary">{employee.employee_code}</span>
+                              <input aria-label={`Họ và tên ${employee.employee_code}`} value={editFullName} onChange={(event) => setEditFullName(event.target.value)} placeholder="Họ và tên" />
+                              <input aria-label={`Mã nhân viên ${employee.employee_code}`} value={editCode} onChange={(event) => setEditCode(event.target.value)} placeholder="Mã nhân viên" />
                             </div>
-                          </div>
+                          ) : (
+                            <div className="employee-name-cell">
+                              <div className="employee-avatar">{employee.full_name?.slice(0, 2)?.toUpperCase() || "AI"}</div>
+                              <div className="stack-sm">
+                                <strong>{employee.full_name}</strong>
+                                <span className="text-secondary">{employee.employee_code}</span>
+                              </div>
+                            </div>
+                          )}
                         </td>
-                        <td>{buildDepartment(employee)}</td>
+                        <td>
+                          {editingId === employee.id ? (
+                            <input aria-label={`Phòng ban ${employee.employee_code}`} value={editDepartmentName} onChange={(event) => setEditDepartmentName(event.target.value)} placeholder="Phòng ban" />
+                          ) : (
+                            employee.department || "Văn phòng"
+                          )}
+                        </td>
+                        <td>
+                          {editingId === employee.id ? (
+                            <input
+                              aria-label={`Chức vụ ${employee.employee_code}`}
+                              value={editPosition}
+                              onChange={(event) => setEditPosition(event.target.value)}
+                              placeholder="Chức vụ"
+                              list="employee-position-options"
+                            />
+                          ) : (
+                            employee.position || "Nhân viên"
+                          )}
+                        </td>
                         <td>{employee.total_days_worked ?? 0}</td>
                         <td>{employee.on_time_count ?? 0}</td>
                         <td>{employee.late_count ?? 0}</td>
@@ -206,9 +315,30 @@ export default function EmployeeListPage() {
                           <span className={`badge badge-${status.tone}`}>{status.label}</span>
                         </td>
                         <td>
-                          <Link className="btn btn-ghost btn-sm" to={`/manager/employees/${employee.id}/faces`}>
-                            Khuon mat
-                          </Link>
+                          <div className="row-actions">
+                            <Link className="btn btn-ghost btn-sm" to={`/manager/employees/${employee.id}/faces`}>
+                              Khuôn mặt
+                            </Link>
+                            {editingId === employee.id ? (
+                              <>
+                                <button type="button" className="btn btn-primary btn-sm" onClick={() => handleUpdate(employee.id)} disabled={actionLoading}>
+                                  Lưu
+                                </button>
+                                <button type="button" className="btn btn-ghost btn-sm" onClick={cancelEdit} disabled={actionLoading}>
+                                  Hủy
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button type="button" className="btn btn-ghost btn-sm" onClick={() => startEdit(employee)} disabled={actionLoading}>
+                                  Sửa
+                                </button>
+                                <button type="button" className="btn btn-danger btn-sm" onClick={() => handleDelete(employee.id)} disabled={actionLoading}>
+                                  Xóa
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -221,50 +351,44 @@ export default function EmployeeListPage() {
 
         <article className="glass-panel employee-create-panel">
           <div className="stack-sm">
-            <span className="section-label">Create New Profile</span>
-            <h2>Them nhan vien moi</h2>
-            <p className="text-secondary">Tao nhanh ho so nhan vien truoc khi thu thap bo 5 anh khuon mat.</p>
+            <span className="section-label">Tạo hồ sơ mới</span>
+            <h2>Thêm nhân viên mới</h2>
+            <p className="text-secondary">Tạo nhanh hồ sơ nhân viên trước khi thu thập bộ 5 ảnh khuôn mặt.</p>
           </div>
 
           <form className="field-group" onSubmit={handleSubmit}>
             <div className="field">
-              <label htmlFor="employee-code">Ma nhan vien</label>
-              <input
-                id="employee-code"
-                value={code}
-                onChange={(event) => setCode(event.target.value)}
-                placeholder="VD: NV001"
-              />
+              <label htmlFor="employee-code">Mã nhân viên</label>
+              <input id="employee-code" value={code} onChange={(event) => setCode(event.target.value)} placeholder="VD: NV001" />
             </div>
             <div className="field">
-              <label htmlFor="employee-name">Ho va ten</label>
-              <input
-                id="employee-name"
-                value={fullName}
-                onChange={(event) => setFullName(event.target.value)}
-                placeholder="VD: Nguyen Van A"
-              />
+              <label htmlFor="employee-name">Họ và tên</label>
+              <input id="employee-name" value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="VD: Nguyễn Văn A" />
             </div>
             <div className="field">
-              <label htmlFor="employee-position">Chuc vu</label>
-              <input
-                id="employee-position"
-                value={position}
-                onChange={(event) => setPosition(event.target.value)}
-                placeholder="VD: Le tan / Ky su / Quan ly"
-              />
+              <label htmlFor="employee-position">Chức vụ</label>
+              <input id="employee-position" value={position} onChange={(event) => setPosition(event.target.value)} placeholder="VD: Lễ tân / Kỹ sư / Quản lý" list="employee-position-options" />
+            </div>
+            <div className="field">
+              <label htmlFor="employee-department">Phòng ban</label>
+              <input id="employee-department" value={departmentName} onChange={(event) => setDepartmentName(event.target.value)} placeholder="VD: Kinh doanh / Kỹ thuật / Nhân sự" />
             </div>
             <button className="btn btn-primary" type="submit" disabled={submitting}>
               {submitting ? (
                 <>
                   <div className="spinner" />
-                  Dang tao...
+                  Đang tạo...
                 </>
               ) : (
-                "Tao nhan vien"
+                "Tạo nhân viên"
               )}
             </button>
           </form>
+          <datalist id="employee-position-options">
+            {Array.from(positions).map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
         </article>
       </section>
     </div>

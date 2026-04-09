@@ -29,7 +29,7 @@ export default function ManagerLoginPage() {
       await signIn(username.trim(), password);
       navigate(location.state?.from || "/manager/dashboard", { replace: true });
     } catch (error) {
-      setMessage(getFriendlyErrorMessage(error, "Khong the dang nhap manager."));
+      setMessage(getFriendlyErrorMessage(error, "Không thể đăng nhập quản trị."));
     } finally {
       setSubmitting(false);
     }
@@ -39,14 +39,14 @@ export default function ManagerLoginPage() {
     <main className="kiosk-shell page-transition" style={{ placeContent: "center" }}>
       <section className="glass-panel" style={{ maxWidth: 480, margin: "0 auto", padding: 32, display: "grid", gap: 24 }}>
         <div className="stack-sm">
-          <span className="section-label">Guardian AI Access</span>
-          <h1>Manager Secure Login</h1>
-          <p className="text-secondary">Dang nhap de quan tri kiosk, nhan vien, lich su camera va bao cao AI.</p>
+          <span className="section-label">Truy cập Guardian AI</span>
+          <h1>Đăng nhập quản trị</h1>
+          <p className="text-secondary">Đăng nhập để quản lý kiosk, nhân viên, lịch sử camera và báo cáo AI.</p>
         </div>
 
         <form className="field-group" onSubmit={handleSubmit}>
           <div className="field">
-            <label htmlFor="manager-user">Ten dang nhap</label>
+            <label htmlFor="manager-user">Tên đăng nhập</label>
             <input
               id="manager-user"
               value={username}
@@ -57,14 +57,14 @@ export default function ManagerLoginPage() {
           </div>
 
           <div className="field">
-            <label htmlFor="manager-pass">Mat khau</label>
+            <label htmlFor="manager-pass">Mật khẩu</label>
             <input
               id="manager-pass"
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
-              placeholder="Nhap mat khau"
+              placeholder="Nhập mật khẩu"
             />
           </div>
 
@@ -74,10 +74,10 @@ export default function ManagerLoginPage() {
             {submitting ? (
               <>
                 <div className="spinner" />
-                Dang xac thuc...
+                Đang xác thực...
               </>
             ) : (
-              "Dang nhap manager"
+              "Đăng nhập quản trị"
             )}
           </button>
         </form>
