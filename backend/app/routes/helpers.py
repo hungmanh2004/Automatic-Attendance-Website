@@ -1,4 +1,4 @@
-from flask import current_app, jsonify
+from flask import current_app, jsonify, url_for
 
 from ..extensions import db
 from ..models import Employee
@@ -41,7 +41,13 @@ def get_service(name):
 def serialize_face_sample(face_sample):
     return {
         "id": face_sample.id,
+        "employee_id": face_sample.employee_id,
         "sample_index": face_sample.sample_index,
         "image_path": face_sample.image_path,
+        "image_url": url_for(
+            "face_enrollment.manager_employee_face_sample_image",
+            employee_id=face_sample.employee_id,
+            sample_index=face_sample.sample_index,
+        ),
         "created_at": face_sample.created_at.isoformat(),
     }

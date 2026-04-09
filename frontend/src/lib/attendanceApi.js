@@ -11,6 +11,12 @@ function buildQuery(params = {}) {
   if (params.search) {
     searchParams.set("search", params.search);
   }
+  if (params.department) {
+    searchParams.set("department", params.department);
+  }
+  if (params.position) {
+    searchParams.set("position", params.position);
+  }
   const query = searchParams.toString();
   return query ? `?${query}` : "";
 }

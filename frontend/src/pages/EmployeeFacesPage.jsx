@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { deleteFaceSamples, enrollFaceSamples, getFaceSamples } from "../lib/api";
-import { getFriendlyErrorMessage } from "../lib/errorMessages";
 import { useManagerAuth } from "../context/ManagerAuthContext";
+import { deleteFaceSamples, enrollFaceSamples, getFaceSamples, replaceEmployeeFaceSample } from "../lib/api";
+import { getFriendlyErrorMessage } from "../lib/errorMessages";
 
 const TOTAL_SLOTS = 5;
 
-export function EmployeeFacesPage() {
+export default function EmployeeFacesPage() {
   const { employeeId } = useParams();
   const navigate = useNavigate();
   const { setUnauthenticated } = useManagerAuth();
@@ -19,6 +19,7 @@ export function EmployeeFacesPage() {
   const [files, setFiles] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [replacingIndex, setReplacingIndex] = useState(null);
 
   async function loadFaceSamples() {
     setLoading(true);
@@ -34,13 +35,6 @@ export function EmployeeFacesPage() {
         navigate("/manager/login", { replace: true });
         return;
       }
-      if (error.status === 404) {
-        setMessage("Không tìm thấy nhân viên.");
-        setMessageType("error");
-        setEmployee(null);
-        setFaceSamples([]);
-        return;
-      }
       setMessage(error.message || "Không thể tải dữ liệu khuôn mặt.");
       setMessageType("error");
     } finally {
@@ -49,27 +43,25 @@ export function EmployeeFacesPage() {
   }
 
   useEffect(() => {
-    loadFaceSamples();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void loadFaceSamples();
   }, [employeeId]);
 
   async function handleEnroll(event) {
     event.preventDefault();
     setMessage("");
 
-    if (files.length !== 5) {
-      setMessage("Vui lòng chọn chính xác 5 hình ảnh.");
+    if (files.length !== TOTAL_SLOTS) {
+      setMessage(`Cần chọn đúng ${TOTAL_SLOTS} ảnh khuôn mặt.`);
       setMessageType("error");
       return;
     }
 
     setSubmitting(true);
-
     try {
       await enrollFaceSamples(employeeId, files);
       setFiles([]);
       await loadFaceSamples();
-      setMessage("Đã đăng ký khuôn mặt thành công!");
+      setMessage("Đã cập nhật bộ khuôn mặt nhân viên.");
       setMessageType("success");
     } catch (error) {
       if (error.status === 401) {
@@ -77,7 +69,7 @@ export function EmployeeFacesPage() {
         navigate("/manager/login", { replace: true });
         return;
       }
-      setMessage(getFriendlyErrorMessage(error, "Không thể đăng ký khuôn mặt. Vui lòng thử lại."));
+      setMessage(getFriendlyErrorMessage(error, "Không thể đăng ký khuôn mặt."));
       setMessageType("error");
     } finally {
       setSubmitting(false);
@@ -87,11 +79,10 @@ export function EmployeeFacesPage() {
   async function handleDelete() {
     setDeleting(true);
     setMessage("");
-
     try {
       await deleteFaceSamples(employeeId);
       await loadFaceSamples();
-      setMessage("Đã xóa đăng ký khuôn mặt thành công.");
+      setMessage("Đã xóa bộ khuôn mặt hiện tại.");
       setMessageType("success");
     } catch (error) {
       if (error.status === 401) {
@@ -99,145 +90,138 @@ export function EmployeeFacesPage() {
         navigate("/manager/login", { replace: true });
         return;
       }
-      setMessage(getFriendlyErrorMessage(error, "Không thể xóa đăng ký khuôn mặt. Vui lòng thử lại."));
+      setMessage(getFriendlyErrorMessage(error, "Không thể xóa bộ khuôn mặt."));
       setMessageType("error");
     } finally {
       setDeleting(false);
     }
   }
 
-  const sampleCount = faceSamples.length;
-  const emptySlots = Math.max(0, TOTAL_SLOTS - sampleCount);
+  async function handleReplaceSample(sampleIndex, file) {
+    if (!file) return;
+
+    setReplacingIndex(sampleIndex);
+    setMessage("");
+
+    try {
+      await replaceEmployeeFaceSample(employeeId, sampleIndex, file);
+      await loadFaceSamples();
+      setMessage(`Đã cập nhật ảnh mẫu ${sampleIndex}.`);
+      setMessageType("success");
+    } catch (error) {
+      if (error.status === 401) {
+        setUnauthenticated();
+        navigate("/manager/login", { replace: true });
+        return;
+      }
+      setMessage(getFriendlyErrorMessage(error, `Không thể cập nhật ảnh mẫu ${sampleIndex}.`));
+      setMessageType("error");
+    } finally {
+      setReplacingIndex(null);
+    }
+  }
 
   return (
-    <div className="stack-lg page-transition">
-      {/* Header */}
+    <div className="page-shell">
       <div className="page-header">
         <div className="page-header-info">
-          <div className="row" style={{ gap: "var(--sp-2)" }}>
-            <Link to="/manager/employees" className="btn btn-ghost btn-sm" style={{ marginLeft: -8 }}>
-              ← Quay lại
-            </Link>
-          </div>
-          <h1>Đăng ký khuôn mặt</h1>
-          <p>
-            {employee ? `${employee.employee_code} — ${employee.full_name}` : "Đang tải..."}
-          </p>
+          <span className="section-label">Phòng thí nghiệm khuôn mặt</span>
+          <h1>Quản lý bộ 5 ảnh khuôn mặt AI</h1>
+          <p className="text-secondary">{employee ? `${employee.employee_code} · ${employee.full_name}` : "Đang tải thông tin nhân viên..."}</p>
         </div>
-        <div className="row" style={{ gap: "var(--sp-2)" }}>
-          <span className={`badge ${sampleCount === TOTAL_SLOTS ? "badge-success" : "badge-warning"}`}>
-            {sampleCount}/{TOTAL_SLOTS} mẫu
-          </span>
-        </div>
+        <Link className="btn btn-secondary" to="/manager/employees">
+          Quay lại nhân viên
+        </Link>
       </div>
 
-      {/* Alert */}
-      {message && (
-        <div className={`alert alert-${messageType}`} role={messageType === "error" ? "alert" : undefined}>
-          {message}
-        </div>
-      )}
+      {message ? <div className={`alert alert-${messageType}`}>{message}</div> : null}
 
-      {/* Grid: Face slots left, Upload form right */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "var(--sp-6)", alignItems: "start" }}>
-
-        {/* Face Sample Grid */}
-        <div className="card">
-          <h3 style={{ marginBottom: "var(--sp-4)" }}>Mẫu khuôn mặt hiện tại</h3>
+      <section className="employee-grid">
+        <article className="glass-panel employee-table-panel">
+          <div className="row-between">
+            <div className="stack-sm">
+              <span className="section-label">Mẫu đã đăng ký</span>
+              <h2>Mẫu khuôn mặt hiện tại</h2>
+            </div>
+            <span className={`badge ${faceSamples.length === TOTAL_SLOTS ? "badge-success" : "badge-warning"}`}>
+              {faceSamples.length}/{TOTAL_SLOTS} mẫu
+            </span>
+          </div>
 
           {loading ? (
             <div className="loading-row">
               <div className="spinner" />
-              Đang tải dữ liệu...
+              Đang tải dữ liệu khuôn mặt...
             </div>
           ) : (
-            <>
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: `repeat(${TOTAL_SLOTS}, 1fr)`,
-                gap: "var(--sp-3)"
-              }}>
-                {faceSamples.map((sample) => (
-                  <div key={sample.id} style={{
-                    aspectRatio: "1",
-                    borderRadius: "var(--radius-sm)",
-                    background: "var(--success-bg)",
-                    border: "2px solid var(--success)",
-                    display: "grid",
-                    placeItems: "center",
-                    fontSize: "13px",
-                    fontWeight: 500,
-                    color: "var(--success)",
-                  }}>
-                    ✓ #{sample.sample_index}
+            <div className="face-grid">
+              {Array.from({ length: TOTAL_SLOTS }).map((_, index) => {
+                const sampleIndex = index + 1;
+                const sample = faceSamples.find((item) => item.sample_index === sampleIndex);
+                return (
+                  <div key={sampleIndex} className={`face-slot ${sample ? "is-filled" : ""}`}>
+                    <strong>{`Mẫu ${sampleIndex}`}</strong>
+                    {sample?.image_url ? (
+                      <img className="face-thumb" src={sample.image_url} alt={`Mẫu ${sampleIndex}`} />
+                    ) : (
+                      <div className="face-thumb-placeholder">Chưa có ảnh</div>
+                    )}
+                    <span>{sample ? "Đã sẵn sàng nhận diện" : "Đang chờ ảnh mới"}</span>
+                    <label className="btn btn-ghost btn-sm">
+                      {replacingIndex === sampleIndex ? "Đang cập nhật..." : sample ? "Sửa ảnh này" : "Thêm ảnh này"}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        hidden
+                        disabled={replacingIndex === sampleIndex}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          void handleReplaceSample(sampleIndex, file);
+                          event.target.value = "";
+                        }}
+                      />
+                    </label>
                   </div>
-                ))}
-                {Array.from({ length: emptySlots }).map((_, i) => (
-                  <div key={`empty-${i}`} style={{
-                    aspectRatio: "1",
-                    borderRadius: "var(--radius-sm)",
-                    border: "2px dashed var(--border)",
-                    display: "grid",
-                    placeItems: "center",
-                    fontSize: "12px",
-                    color: "var(--text-hint)",
-                  }}>
-                    Trống
-                  </div>
-                ))}
-              </div>
-
-              {sampleCount > 0 && (
-                <div style={{ marginTop: "var(--sp-4)" }}>
-                  <button
-                    className="btn btn-danger btn-sm"
-                    type="button"
-                    onClick={handleDelete}
-                    disabled={deleting || loading}
-                  >
-                    {deleting ? "Đang xóa..." : "Xóa toàn bộ đăng ký"}
-                  </button>
-                </div>
-              )}
-            </>
+                );
+              })}
+            </div>
           )}
-        </div>
 
-        {/* Upload Form */}
-        <div className="card stack">
-          <h3>Tải lên 5 ảnh khuôn mặt</h3>
-          <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
-            Chọn đúng 5 hình ảnh rõ mặt, từ nhiều góc độ khác nhau để tăng độ chính xác nhận diện.
-          </p>
+          {faceSamples.length > 0 ? (
+            <button className="btn btn-danger" type="button" onClick={handleDelete} disabled={deleting || loading}>
+              {deleting ? "Đang xóa..." : "Xóa toàn bộ khuôn mặt"}
+            </button>
+          ) : null}
+        </article>
+
+        <article className="glass-panel employee-create-panel">
+          <div className="stack-sm">
+            <span className="section-label">Bộ tải lên</span>
+            <h2>Tải lên 5 ảnh huấn luyện</h2>
+            <p className="text-secondary">Dùng 5 ảnh rõ mặt, ánh sáng ổn định, nhiều góc nhìn để AI tạo bộ embedding chính xác.</p>
+          </div>
+
           <form className="field-group" onSubmit={handleEnroll}>
             <div className="field">
-              <label htmlFor="face-files">Hình ảnh khuôn mặt</label>
-              <input
-                id="face-files"
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={(e) => setFiles(Array.from(e.target.files || []))}
-                style={{ padding: "8px" }}
-              />
+              <label htmlFor="face-files">Ảnh khuôn mặt</label>
+              <input id="face-files" type="file" accept="image/*" multiple onChange={(event) => setFiles(Array.from(event.target.files || []))} />
             </div>
-            {files.length > 0 && files.length !== 5 && (
-              <p style={{ fontSize: "12px", color: "var(--warning)" }}>
-                Đã chọn {files.length} ảnh. Cần đúng 5 ảnh.
-              </p>
-            )}
+            <div className="pill">
+              {files.length} / {TOTAL_SLOTS} ảnh đã chọn
+            </div>
             <button className="btn btn-primary" type="submit" disabled={submitting}>
               {submitting ? (
-                <><div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> Đang đăng ký...</>
+                <>
+                  <div className="spinner" />
+                  Đang xử lý AI...
+                </>
               ) : (
                 "Đăng ký khuôn mặt"
               )}
             </button>
           </form>
-        </div>
-      </div>
+        </article>
+      </section>
     </div>
   );
 }
-
-export default EmployeeFacesPage;

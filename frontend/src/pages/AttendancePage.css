@@ -1,82 +1,22 @@
 .attendance-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--sp-3);
-  padding: var(--sp-4);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-}
-
-.attendance-filters .field {
-  flex: 1;
-  min-width: 140px;
-}
-
-.attendance-actions {
-  display: flex;
-  gap: var(--sp-2);
-}
-
-.attendance-summary-card {
-  display: flex;
-  flex-direction: column;
-  padding: var(--sp-4) var(--sp-5);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-  min-width: 140px;
-}
-
-.attendance-summary-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-hint);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.attendance-summary-card strong {
-  font-size: 2rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  line-height: 1.1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  padding: 20px;
 }
 
 .attendance-table-wrap {
-  overflow-x: auto;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
+  padding: 10px;
 }
 
-.attendance-thumb {
-  width: 80px;
-  height: 60px;
-  object-fit: cover;
-  border-radius: var(--radius-xs);
-  border: 1px solid var(--border);
-  transition: opacity .15s;
-}
-
-.attendance-snapshot-link {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 4px;
-  text-decoration: none;
-  color: var(--brand);
-  font-size: 12px;
-}
-.attendance-snapshot-link:hover .attendance-thumb {
-  opacity: .85;
-}
-
-@media (max-width: 768px) {
+@media (max-width: 960px) {
   .attendance-filters {
-    flex-direction: column;
+    grid-template-columns: 1fr 1fr;
   }
-  .attendance-filters .field {
-    min-width: 100%;
+}
+
+@media (max-width: 640px) {
+  .attendance-filters {
+    grid-template-columns: 1fr;
   }
 }

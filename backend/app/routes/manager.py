@@ -16,6 +16,7 @@ from ..services.auth import (
     serialize_employee,
     serialize_manager,
 )
+from .face_enrollment import _delete_face_samples_for_employee
 from .helpers import (
     attendance_not_found,
     get_service,
@@ -106,6 +107,8 @@ def manager_create_employee():
     payload = request.get_json(silent=True) or {}
     employee_code = normalize_text(payload.get("employee_code"))
     full_name = normalize_text(payload.get("full_name"))
+    department = normalize_text(payload.get("department")) or "Văn phòng"
+    position = normalize_text(payload.get("position")) or "Nhan vien"
     if not employee_code or not full_name:
         return invalid_request("employee_code and full_name are required")
 
@@ -113,7 +116,12 @@ def manager_create_employee():
     if existing_employee is not None:
         return jsonify({"status": "duplicate_employee_code"}), 409
 
-    employee = Employee(employee_code=employee_code, full_name=full_name)
+    employee = Employee(
+        employee_code=employee_code,
+        full_name=full_name,
+        department=department,
+        position=position,
+    )
     db.session.add(employee)
     try:
         db.session.commit()
@@ -125,6 +133,75 @@ def manager_create_employee():
         raise
 
     return jsonify({"employee": serialize_employee(employee)}), 201
+
+
+@manager_bp.put("/manager/employees/<int:employee_id>")
+def manager_update_employee(employee_id):
+    _, error_response = require_manager()
+    if error_response is not None:
+        return error_response
+
+    employee = db.session.get(Employee, employee_id)
+    if employee is None:
+        return jsonify({"status": "employee_not_found"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    employee_code = normalize_text(payload.get("employee_code"))
+    full_name = normalize_text(payload.get("full_name"))
+    department = normalize_text(payload.get("department")) or "Văn phòng"
+    position = normalize_text(payload.get("position")) or "Nhan vien"
+
+    if not employee_code or not full_name:
+        return invalid_request("employee_code and full_name are required")
+
+    existing_employee = Employee.query.filter(
+        Employee.employee_code == employee_code,
+        Employee.id != employee.id,
+    ).first()
+    if existing_employee is not None:
+        return jsonify({"status": "duplicate_employee_code"}), 409
+
+    employee.employee_code = employee_code
+    employee.full_name = full_name
+    employee.department = department
+    employee.position = position
+    employee.is_active = bool(payload.get("is_active", employee.is_active))
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        code_conflict = Employee.query.filter_by(employee_code=employee_code).first()
+        if code_conflict is not None and code_conflict.id != employee.id:
+            return jsonify({"status": "duplicate_employee_code"}), 409
+        raise
+
+    return jsonify({"employee": serialize_employee(employee)})
+
+
+@manager_bp.delete("/manager/employees/<int:employee_id>")
+def manager_delete_employee(employee_id):
+    _, error_response = require_manager()
+    if error_response is not None:
+        return error_response
+
+    employee = db.session.get(Employee, employee_id)
+    if employee is None:
+        return jsonify({"status": "employee_not_found"}), 404
+
+    # Keep historical attendance rows, but disable recognition and hide the employee operationally.
+    employee.is_active = False
+    db.session.commit()
+
+    deleted_samples = _delete_face_samples_for_employee(employee.id)
+    return jsonify(
+        {
+            "status": "deleted",
+            "employee_id": employee.id,
+            "deactivated": True,
+            "deleted_face_samples": len(deleted_samples),
+        }
+    )
 
 
 @manager_bp.get("/manager/attendance")
@@ -152,8 +229,16 @@ def manager_attendance():
         return invalid_request("from must be less than or equal to to")
 
     search = normalize_text(request.args.get("search"))
+    department = normalize_text(request.args.get("department"))
+    position = normalize_text(request.args.get("position"))
     attendance_service = get_service("attendance_service")
-    rows = attendance_service.list_attendance_events(from_date=from_date, to_date=to_date, search=search)
+    rows = attendance_service.list_attendance_events(
+        from_date=from_date,
+        to_date=to_date,
+        search=search,
+        department=department,
+        position=position,
+    )
 
     records = []
     for event, employee in rows:
@@ -163,7 +248,10 @@ def manager_attendance():
                 "employee_id": event.employee_id,
                 "employee_code": employee.employee_code,
                 "full_name": employee.full_name,
+                "department": employee.department,
+                "position": employee.position,
                 "checked_in_at": event.checked_in_at.isoformat(),
+                "distance": event.distance,
                 "snapshot_url": url_for("manager.manager_attendance_snapshot", attendance_id=event.id),
             }
         )
@@ -174,6 +262,8 @@ def manager_attendance():
                 "from": from_date.isoformat(),
                 "to": to_date.isoformat(),
                 "search": search or "",
+                "department": department or "",
+                "position": position or "",
             },
             "summary": {
                 "total_records": len(records),
@@ -181,6 +271,16 @@ def manager_attendance():
             "records": records,
         }
     )
+
+
+@manager_bp.get("/manager/dashboard")
+def manager_dashboard():
+    _, error_response = require_manager()
+    if error_response is not None:
+        return error_response
+
+    dashboard_summary = get_service("attendance_service").get_dashboard_summary()
+    return jsonify(dashboard_summary)
 
 
 @manager_bp.get("/manager/attendance/<int:attendance_id>/snapshot")

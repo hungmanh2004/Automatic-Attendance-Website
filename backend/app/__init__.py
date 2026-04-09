@@ -1,6 +1,8 @@
 from pathlib import Path
 
 from flask import Flask
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import OperationalError
 
 from .config import Config
 from .extensions import db
@@ -36,6 +38,31 @@ def _initialize_database(app):
 
     with app.app_context():
         db.create_all()
+        _run_schema_updates()
+
+
+def _run_schema_updates():
+    inspector = inspect(db.engine)
+    employee_columns = {column["name"] for column in inspector.get_columns("employees")}
+    if "department" not in employee_columns:
+        try:
+            db.session.execute(text("ALTER TABLE employees ADD COLUMN department VARCHAR(255) DEFAULT 'Văn phòng'"))
+        except OperationalError as error:
+            if "duplicate column name: department" not in str(error):
+                raise
+            db.session.rollback()
+        db.session.execute(text("UPDATE employees SET department = 'Văn phòng' WHERE department IS NULL"))
+        db.session.commit()
+
+    if "position" not in employee_columns:
+        try:
+            db.session.execute(text("ALTER TABLE employees ADD COLUMN position VARCHAR(255) DEFAULT 'Nhan vien'"))
+        except OperationalError as error:
+            if "duplicate column name: position" not in str(error):
+                raise
+            db.session.rollback()
+        db.session.execute(text("UPDATE employees SET position = 'Nhan vien' WHERE position IS NULL"))
+        db.session.commit()
 
 
 def _initialize_services(app):

@@ -8,9 +8,12 @@ export function ProtectedRoute({ children }) {
 
   if (status === "loading") {
     return (
-      <main className="page-frame">
-        <div className="surface">
-          <p className="note">Checking your manager session...</p>
+      <main className="kiosk-shell" style={{ placeContent: "center" }}>
+        <div className="glass-panel" style={{ maxWidth: 420, margin: "0 auto", padding: 28 }}>
+          <div className="loading-row">
+            <div className="spinner" />
+            Đang kiểm tra phiên đăng nhập quản lý...
+          </div>
         </div>
       </main>
     );

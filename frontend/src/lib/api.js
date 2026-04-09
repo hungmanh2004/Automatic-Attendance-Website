@@ -81,24 +81,42 @@ export function fetchManagerMe() {
 export const getCurrentManager = fetchManagerMe
 export const getManager = fetchManagerMe
 
+export function fetchDashboardSummary() {
+  return apiRequest('/api/manager/dashboard')
+}
+
 export function fetchEmployees() {
   return apiRequest('/api/manager/employees')
 }
 
 export const getEmployees = fetchEmployees
 
-export function createEmployee(employeeOrCode, fullName) {
+export function createEmployee(employeeOrCode, fullName, position) {
   const employee =
     typeof employeeOrCode === 'object' && employeeOrCode !== null
       ? employeeOrCode
       : {
           employee_code: employeeOrCode,
           full_name: fullName,
+          position,
         }
 
   return apiRequest('/api/manager/employees', {
     body: employee,
     method: 'POST',
+  })
+}
+
+export function updateEmployee(employeeId, employee) {
+  return apiRequest(`/api/manager/employees/${employeeId}`, {
+    body: employee,
+    method: 'PUT',
+  })
+}
+
+export function deleteEmployee(employeeId) {
+  return apiRequest(`/api/manager/employees/${employeeId}`, {
+    method: 'DELETE',
   })
 }
 
@@ -131,6 +149,16 @@ export const enrollFaceSamples = enrollEmployeeFaces
 export function deleteEmployeeFaceSamples(employeeId) {
   return apiRequest(`/api/manager/employees/${employeeId}/face-samples`, {
     method: 'DELETE',
+  })
+}
+
+export function replaceEmployeeFaceSample(employeeId, sampleIndex, file) {
+  const formData = new FormData()
+  formData.append('image', file, file?.name || `sample-${sampleIndex}.jpg`)
+
+  return apiRequest(`/api/manager/employees/${employeeId}/face-samples/${sampleIndex}`, {
+    body: formData,
+    method: 'PUT',
   })
 }
 

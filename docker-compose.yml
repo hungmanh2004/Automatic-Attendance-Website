@@ -1,45 +1,22 @@
 services:
   backend:
     build:
-      context: ./backend
-    working_dir: /app
-    volumes:
-      - ./:/app
-      - ./backend/data:/app/backend/data
-      - deepface-cache:/root/.deepface
-      - ultralytics-cache:/root/.config/Ultralytics
-    ports:
-      - "5000:5000"
+      context: .
+      dockerfile: backend/Dockerfile
     env_file:
       - path: .env
         required: false
     environment:
-      - FLASK_APP=/app/backend/run.py
-      - FLASK_DEBUG=1
-      - SECRET_KEY=${SECRET_KEY:-local-dev-only-change-this}
-    command: flask run --host=0.0.0.0 --port=5000 --reload
-    networks:
-      - app-net
+      SECRET_KEY: ${SECRET_KEY:-local-dev-only-change-this}
+    volumes:
+      - ./backend/data:/app/backend/data
+    ports:
+      - "5000:5000"
 
   frontend:
     build:
       context: ./frontend
-    working_dir: /app
-    volumes:
-      - ./frontend:/app
-      - frontend_node_modules:/app/node_modules
-    ports:
-      - "5173:5173"
-    command: npm run dev -- --host
-    networks:
-      - app-net
     depends_on:
       - backend
-
-networks:
-  app-net:
-
-volumes:
-  deepface-cache:
-  ultralytics-cache:
-  frontend_node_modules:
+    ports:
+      - "8080:80"

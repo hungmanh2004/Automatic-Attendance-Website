@@ -28,15 +28,22 @@ def _create_manager(app, username="manager", password="secret123"):
         }
 
 
-def _create_employee(app, employee_code="EMP-001", full_name="Ada Lovelace"):
+def _create_employee(app, employee_code="EMP-001", full_name="Ada Lovelace", department="Văn phòng", position="Nhân viên"):
     with app.app_context():
-        employee = Employee(employee_code=employee_code, full_name=full_name)
+        employee = Employee(
+            employee_code=employee_code,
+            full_name=full_name,
+            department=department,
+            position=position,
+        )
         db.session.add(employee)
         db.session.commit()
         return {
             "id": employee.id,
             "employee_code": employee.employee_code,
             "full_name": employee.full_name,
+            "department": employee.department,
+            "position": employee.position,
             "is_active": employee.is_active,
         }
 
@@ -102,7 +109,13 @@ def test_manager_attendance_defaults_to_today_when_filters_missing(app, client, 
 
     assert response.status_code == 200
     payload = response.get_json()
-    assert payload["filters"] == {"from": "2026-04-03", "to": "2026-04-03", "search": ""}
+    assert payload["filters"] == {
+        "from": "2026-04-03",
+        "to": "2026-04-03",
+        "search": "",
+        "department": "",
+        "position": "",
+    }
     assert payload["summary"]["total_records"] == 1
     assert payload["records"][0]["employee_code"] == "EMP-100"
 
@@ -117,8 +130,8 @@ def test_manager_attendance_filters_by_date_range_and_search(app, client, monkey
 
     manager = _create_manager(app)
     employee_a = _create_employee(app, employee_code="EMP-200", full_name="Ada Lovelace")
-    employee_b = _create_employee(app, employee_code="EMP-201", full_name="Grace Hopper")
-    employee_c = _create_employee(app, employee_code="EMP-202", full_name="Alan Turing")
+    employee_b = _create_employee(app, employee_code="EMP-201", full_name="Grace Hopper", department="Kỹ thuật", position="Kỹ sư")
+    employee_c = _create_employee(app, employee_code="EMP-202", full_name="Alan Turing", department="Nhân sự", position="Chuyên viên")
 
     _create_attendance_event(app, employee_a["id"], datetime(2026, 4, 1, 8, 0, 0), "a.jpg")
     _create_attendance_event(app, employee_b["id"], datetime(2026, 4, 2, 8, 0, 0), "b.jpg")
@@ -136,10 +149,48 @@ def test_manager_attendance_filters_by_date_range_and_search(app, client, monkey
         "from": "2026-04-02",
         "to": "2026-04-03",
         "search": "hopper",
+        "department": "",
+        "position": "",
     }
     assert payload["summary"]["total_records"] == 1
     assert payload["records"][0]["employee_code"] == "EMP-201"
     assert payload["records"][0]["full_name"] == "Grace Hopper"
+    assert payload["records"][0]["department"] == "Kỹ thuật"
+    assert payload["records"][0]["position"] == "Kỹ sư"
+
+
+def test_manager_attendance_filters_by_department_and_position(app, client, monkeypatch):
+    class FixedDateTime:
+        @classmethod
+        def now(cls):
+            return datetime(2026, 4, 3, 10, 0, 0)
+
+    monkeypatch.setattr(attendance_module, "datetime", FixedDateTime)
+
+    manager = _create_manager(app)
+    employee_a = _create_employee(app, employee_code="EMP-210", full_name="Ada Lovelace", department="Kỹ thuật", position="Kỹ sư")
+    employee_b = _create_employee(app, employee_code="EMP-211", full_name="Grace Hopper", department="Kỹ thuật", position="Trưởng nhóm")
+    employee_c = _create_employee(app, employee_code="EMP-212", full_name="Alan Turing", department="Nhân sự", position="Kỹ sư")
+
+    _create_attendance_event(app, employee_a["id"], datetime(2026, 4, 3, 8, 0, 0), "a.jpg")
+    _create_attendance_event(app, employee_b["id"], datetime(2026, 4, 3, 8, 10, 0), "b.jpg")
+    _create_attendance_event(app, employee_c["id"], datetime(2026, 4, 3, 8, 20, 0), "c.jpg")
+
+    _login_manager(client, manager)
+
+    response = client.get("/api/manager/attendance?department=K%E1%BB%B9%20thu%E1%BA%ADt&position=K%E1%BB%B9%20s%C6%B0")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["filters"] == {
+        "from": "2026-04-03",
+        "to": "2026-04-03",
+        "search": "",
+        "department": "Kỹ thuật",
+        "position": "Kỹ sư",
+    }
+    assert payload["summary"]["total_records"] == 1
+    assert payload["records"][0]["employee_code"] == "EMP-210"
 
 
 def test_manager_attendance_search_matches_employee_code_case_insensitively(app, client, monkeypatch):
