@@ -58,6 +58,7 @@ README này đã được cập nhật theo kiến trúc hiện tại của repo
 
 ```text
 .
+|-- .brain/            (Chứa Project Memory & Session State cho AI)
 |-- backend/
 |   |-- app/
 |   |   |-- routes/
@@ -67,6 +68,9 @@ README này đã được cập nhật theo kiến trúc hiện tại của repo
 |   |-- tests/
 |   |-- Dockerfile
 |   `-- run.py
+|-- docs/
+|   |-- plans/         (Kế hoạch thực hiện các phase)
+|   `-- superpowers/   (Đặc tả kỹ thuật & Design Documents)
 |-- frontend/
 |   |-- src/
 |   |   |-- pages/
@@ -76,7 +80,8 @@ README này đã được cập nhật theo kiến trúc hiện tại của repo
 |   |-- package.json
 |   `-- vite.config.js
 |-- scripts/
-|   `-- create_manager.py
+|   |-- create_manager.py
+|   `-- migrate_redis_vector.py
 |-- docker-compose.yml
 |-- run-local.ps1
 `-- .env.example

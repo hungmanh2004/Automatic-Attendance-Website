@@ -7,6 +7,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    optimizeDeps: {
+      exclude: ["onnxruntime-web"],
+    },
     server: {
       host: env.FRONTEND_HOST || "127.0.0.1",
       port: Number(env.FRONTEND_PORT || 5173),
@@ -25,3 +28,4 @@ export default defineConfig(({ mode }) => {
     },
   };
 });
+

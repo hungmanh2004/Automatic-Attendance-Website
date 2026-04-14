@@ -13,6 +13,27 @@ export async function submitGuestCheckin(frameFile) {
   })
 }
 
+/**
+ * Luồng mới: gửi ảnh crop khuôn mặt + 5 keypoints lên backend.
+ * Frontend đã chạy YOLO ONNX để detect + crop, backend chỉ align + embed.
+ *
+ * @param {Blob} cropBlob - Ảnh crop JPEG (đã có padding)
+ * @param {number[]} localKeypoints - Mảng flat [x0,y0,...,x4,y4] tọa độ local
+ * @returns {Promise<object>} Response từ backend
+ */
+export async function submitGuestCheckinKpts(cropBlob, localKeypoints) {
+  const formData = new FormData()
+  formData.append('crop', cropBlob, 'face-crop.jpg')
+  if (localKeypoints && localKeypoints.length > 0) {
+    formData.append('kpts', JSON.stringify(localKeypoints))
+  }
+
+  return apiRequest('/api/guest/checkin-kpts', {
+    body: formData,
+    method: 'POST',
+  })
+}
+
 export async function captureGuestFrame(videoElement) {
   if (!videoElement || !videoElement.videoWidth || !videoElement.videoHeight) {
     return null
@@ -37,3 +58,4 @@ export async function captureGuestFrame(videoElement) {
 
   return new File([blob], 'guest-frame.jpg', { type: 'image/jpeg' })
 }
+
