@@ -12,3 +12,8 @@ class Config:
     SECRET_KEY = os.getenv("SECRET_KEY") or secrets.token_hex(32)
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024
+    REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+    SESSION_TYPE = "redis"
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = "Lax"
+    SESSION_PERMANENT = False
