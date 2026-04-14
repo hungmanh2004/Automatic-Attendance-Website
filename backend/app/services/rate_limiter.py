@@ -1,23 +1,19 @@
-import time
-from collections import defaultdict
-from threading import Lock
+from .redis_client import get_redis
+
+_RATE_LIMIT_PREFIX = "rl:"
 
 
 class RateLimiter:
-    """In-memory sliding-window rate limiter (per key, typically IP)."""
+    """Redis fixed-window rate limiter (per key, typically IP)."""
 
     def __init__(self, max_requests=10, window_seconds=60):
         self.max_requests = max_requests
         self.window_seconds = window_seconds
-        self._lock = Lock()
-        self._buckets = defaultdict(list)
 
-    def is_limited(self, key):
-        now = time.monotonic()
-        with self._lock:
-            timestamps = self._buckets[key]
-            self._buckets[key] = [t for t in timestamps if now - t < self.window_seconds]
-            if len(self._buckets[key]) >= self.max_requests:
-                return True
-            self._buckets[key].append(now)
-            return False
+    def is_limited(self, key: str) -> bool:
+        r = get_redis()
+        redis_key = f"{_RATE_LIMIT_PREFIX}{key}"
+        count = r.incr(redis_key)
+        if count == 1:
+            r.expire(redis_key, self.window_seconds)
+        return count > self.max_requests

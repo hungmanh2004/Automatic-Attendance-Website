@@ -1,4 +1,12 @@
 services:
+  redis:
+    image: redis/redis-stack:latest
+    ports:
+      - "6379:6379"
+      - "8001:8001"
+    volumes:
+      - redis_data:/data
+
   backend:
     build:
       context: .
@@ -8,8 +16,11 @@ services:
         required: false
     environment:
       SECRET_KEY: ${SECRET_KEY:-local-dev-only-change-this}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     volumes:
       - ./backend/data:/app/backend/data
+    depends_on:
+      - redis
     ports:
       - "5000:5000"
 
@@ -20,3 +31,6 @@ services:
       - backend
     ports:
       - "8080:80"
+
+volumes:
+  redis_data:

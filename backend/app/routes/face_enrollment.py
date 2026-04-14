@@ -32,7 +32,7 @@ def _delete_face_samples_for_employee(employee_id):
 
     storage_service = get_service("storage_service")
     storage_service.remove_employee_face_files([fs.image_path for fs in face_samples])
-    get_service("face_index_service").refresh()
+    get_service("face_index_service").delete_employee(employee_id)
 
     return face_samples
 
@@ -164,7 +164,15 @@ def manager_employee_face_enrollment(employee_id):
         storage_service.remove_employee_face_files(saved_paths)
         raise
 
-    face_index_service.refresh()
+    for sample in prepared_samples:
+        embedding = json.loads(sample.embedding_json)
+        face_index_service.upsert(
+            employee_id=employee.id,
+            sample_index=sample.sample_index,
+            employee_code=employee.employee_code,
+            full_name=employee.full_name,
+            embedding=embedding,
+        )
     return (
         jsonify(
             {
@@ -250,7 +258,13 @@ def manager_employee_face_sample_replace(employee_id, sample_index):
     if old_image_path and old_image_path != str(new_image_path):
         storage_service.remove_path(old_image_path)
 
-    face_index_service.refresh()
+    face_index_service.upsert(
+        employee_id=employee.id,
+        sample_index=sample_index,
+        employee_code=employee.employee_code,
+        full_name=employee.full_name,
+        embedding=embeddings[0],
+    )
     return jsonify(
         {
             "employee": serialize_employee(employee),

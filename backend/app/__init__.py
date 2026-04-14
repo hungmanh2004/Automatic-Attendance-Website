@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from flask import Flask
+from flask_session import Session
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
 
@@ -69,6 +70,7 @@ def _initialize_services(app):
     storage_service = StorageService(app.config["CHECKIN_DIR"], app.config["FACES_DIR"])
     embedding_service = EmbeddingService()
     face_index_service = FaceIndexService()
+    face_index_service.setup()
     attendance_service = AttendanceService()
     recognition_service = RecognitionService(
         storage_service=storage_service,
@@ -84,6 +86,12 @@ def _initialize_services(app):
     app.extensions["recognition_service"] = recognition_service
 
 
+def _initialize_redis(app):
+    from .services.redis_client import init_redis
+    redis_client = init_redis(app.config["REDIS_URL"])
+    app.config["SESSION_REDIS"] = redis_client
+
+
 def create_app(test_config=None):
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -93,6 +101,8 @@ def create_app(test_config=None):
 
     _resolve_paths(app)
     _configure_storage(app)
+    _initialize_redis(app)
+    Session(app)
     _initialize_database(app)
     _initialize_services(app)
     app.register_blueprint(health_bp, url_prefix="/api")
