@@ -128,6 +128,17 @@ Sau khi chạy:
 
 Lần chạy đầu có thể chậm hơn do container cần cài dependency và tải model/cache phục vụ nhận diện.
 
+### Khi nào cần rebuild
+
+Sử dụng `docker compose up --build` khi các file dependency thay đổi:
+- `backend/requirements.txt`
+- `frontend/package.json`
+- `Dockerfile`
+
+Với thay đổi source code Python/JS thông thường, chỉ cần:
+- `docker compose up` (khởi động lại containers)
+- `docker compose restart backend` (chỉ restart backend service)
+
 ### Tạo tài khoản manager
 
 Trong một terminal khác:
