@@ -118,6 +118,7 @@ export default function EmployeeFaceScannerPage() {
   const canRetrySave = registration.saveState === "error" && !registration.isSaving;
   const showUtilityDock = registration.systemState.cameraActive && !registration.isSaving && registration.saveState !== "success";
   const poseClass = `pose-${registration.faceAnalysis?.pose || "front"}`;
+  const cameraLiveLabel = registration.systemState.cameraActive ? "Camera dang hoat dong" : "Camera chua san sang";
 
   return (
     <div className="page-shell simple-face-page">
@@ -165,12 +166,24 @@ export default function EmployeeFaceScannerPage() {
         <section className="simple-face-main">
           <article className="glass-panel simple-scanner-card">
             <div className={`simple-scanner-stage ${poseClass}${registration.captureFlash ? " is-capturing" : ""}`}>
-              <video ref={registration.videoRef} className="simple-scanner-video" autoPlay muted playsInline />
+              <video
+                ref={registration.videoRef}
+                className="simple-scanner-video"
+                autoPlay
+                muted
+                playsInline
+                aria-label="Xem truoc camera khuon mat"
+              />
 
               <div className="simple-scanner-overlay">
                 <div className="simple-scanner-vignette" />
                 <div className="simple-scanner-gridlines" />
                 <div className="simple-scanner-radar" />
+                <div className="simple-camera-banner">
+                  <span className={`simple-camera-dot${registration.systemState.cameraActive ? " is-live" : ""}`} />
+                  <strong>{cameraLiveLabel}</strong>
+                  <span>{registration.guidance}</span>
+                </div>
 
                 <div className="simple-scanner-center">
                   <div className="simple-biometric-frame">

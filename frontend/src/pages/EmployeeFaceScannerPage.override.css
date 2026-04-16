@@ -37,8 +37,8 @@
   height: 100%;
   min-height: 560px;
   object-fit: cover;
-  opacity: 0.26;
-  filter: saturate(0.72) brightness(0.54) contrast(1.04);
+  opacity: 0.92;
+  filter: saturate(0.98) brightness(0.9) contrast(1.02);
 }
 
 .simple-scanner-overlay {
@@ -47,12 +47,51 @@
   padding: 28px;
 }
 
+.simple-camera-banner {
+  position: absolute;
+  top: 24px;
+  left: 24px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(460px, calc(100% - 48px));
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: rgba(8, 14, 28, 0.72);
+  border: 1px solid rgba(96, 130, 222, 0.16);
+  color: #eaf1ff;
+  backdrop-filter: blur(14px);
+}
+
+.simple-camera-banner strong {
+  font-size: 13px;
+}
+
+.simple-camera-banner span:last-child {
+  color: rgba(198, 213, 241, 0.82);
+  font-size: 12px;
+}
+
+.simple-camera-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #8292b8;
+  flex: 0 0 auto;
+}
+
+.simple-camera-dot.is-live {
+  background: #23d8a0;
+  box-shadow: 0 0 0 6px rgba(35, 216, 160, 0.12);
+}
+
 .simple-scanner-vignette {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at center, transparent 16%, rgba(5, 10, 22, 0.12) 32%, rgba(3, 8, 18, 0.84) 100%),
-    linear-gradient(180deg, rgba(4, 10, 24, 0.34) 0%, rgba(3, 8, 18, 0.08) 30%, rgba(4, 10, 24, 0.52) 100%);
+    radial-gradient(circle at center, transparent 22%, rgba(5, 10, 22, 0.08) 40%, rgba(3, 8, 18, 0.48) 100%),
+    linear-gradient(180deg, rgba(4, 10, 24, 0.2) 0%, rgba(3, 8, 18, 0.04) 30%, rgba(4, 10, 24, 0.36) 100%);
 }
 
 .simple-scanner-gridlines {
@@ -486,8 +525,15 @@
 
   .simple-scanner-overlay { padding: 18px; }
 
-  .simple-status-stack {
+  .simple-camera-banner {
     top: 18px;
+    left: 18px;
+    right: 18px;
+    max-width: none;
+  }
+
+  .simple-status-stack {
+    top: 92px;
     left: 18px;
     right: 18px;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -518,6 +564,12 @@
 @media (max-width: 640px) {
   .simple-scanner-stage,
   .simple-scanner-video { min-height: 470px; }
+
+  .simple-camera-banner {
+    position: static;
+    margin-bottom: 14px;
+    max-width: none;
+  }
 
   .simple-status-stack {
     position: static;
