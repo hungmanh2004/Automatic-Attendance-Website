@@ -2,7 +2,10 @@ import logging
 
 import numpy as np
 from redis.commands.search.field import NumericField, TextField, VectorField
-from redis.commands.search.indexDefinition import IndexDefinition, IndexType
+try:
+    from redis.commands.search.index_definition import IndexDefinition, IndexType
+except ImportError:
+    from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
 
 from .redis_client import get_redis

@@ -255,3 +255,79 @@ class EmbeddingService:
             logger.info("No embedding produced. Reasons: %s", "; ".join(skip_reasons))
 
         return embeddings
+
+    # ------------------------------------------------------------------
+    # Public API – Luồng mới: nhận ảnh crop + 5 keypoints từ frontend
+    # (YOLO ONNX chạy trên browser, backend chỉ align + embed)
+    # ------------------------------------------------------------------
+    def extract_embeddings_from_crop(self, crop_bytes, keypoints_list):
+        """Nhận ảnh crop đã khoét sẵn + danh sách 5 keypoints, trả về 1 embedding.
+
+        Frontend đã chạy YOLO ONNX trên browser để:
+          1. Tìm bounding box khuôn mặt
+          2. Cắt crop (có padding ~30-50%)
+          3. Trích xuất 5 keypoints (re-mapped về tọa độ local của crop)
+
+        Backend chỉ cần:
+          1. align_face() dựa trên keypoints local
+          2. InsightFace get_feat() để sinh embedding vector
+
+        Args:
+            crop_bytes: raw bytes của ảnh crop (JPEG/PNG).
+            keypoints_list: list 10 số [x0,y0, x1,y1, ..., x4,y4]
+                            tương ứng 5 điểm: mắt_trái, mắt_phải,
+                            mũi, mép_trái, mép_phải – **tọa độ local
+                            trong crop** (frontend đã trừ offset).
+
+        Returns:
+            list[float] | None: embedding vector, hoặc None nếu thất bại.
+        """
+        # Decode crop bytes → numpy BGR image
+        arr = np.frombuffer(crop_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            logger.warning("extract_embeddings_from_crop: cannot decode crop image")
+            return None
+
+        h, w = img.shape[:2]
+        if h < 20 or w < 20:
+            logger.warning("extract_embeddings_from_crop: crop too small (%dx%d)", w, h)
+            return None
+
+        # Parse keypoints: [x0,y0, x1,y1, ... x4,y4] → numpy (5,2)
+        kps = None
+        if keypoints_list and len(keypoints_list) >= 4:
+            try:
+                flat = [float(v) for v in keypoints_list]
+                kps = np.array(flat, dtype=np.int32).reshape(-1, 2)
+            except (ValueError, TypeError):
+                logger.warning("extract_embeddings_from_crop: invalid keypoints, fallback to raw crop")
+                kps = None
+
+        # Box bao trọn toàn bộ crop (vì frontend đã khoét đúng vùng mặt)
+        box = (0, 0, w, h)
+
+        # Bước 1: Align face dựa trên keypoints local
+        aligned_face = align_face(img, kps, box)
+
+        if aligned_face is None or aligned_face.size == 0:
+            logger.warning("extract_embeddings_from_crop: alignment produced empty result")
+            return None
+
+        # Bước 2: Resize về 112x112 chuẩn InsightFace
+        try:
+            face_for_recognition = cv2.resize(
+                aligned_face, (112, 112), interpolation=cv2.INTER_AREA
+            )
+            vector = self._get_insightface_recognizer().get_feat(face_for_recognition)
+            if vector is None:
+                return None
+
+            vector_np = np.asarray(vector, dtype=np.float32)
+            if vector_np.ndim > 1:
+                vector_np = vector_np[0]
+
+            return vector_np.reshape(-1).tolist()
+        except Exception:
+            logger.warning("extract_embeddings_from_crop: InsightFace failed", exc_info=True)
+            return None

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useGuestCamera } from "../hooks/useGuestCamera";
+import { useYoloDetection } from "../hooks/useYoloDetection";
 import { captureGuestFrame, submitGuestCheckin } from "../lib/guestApi";
 import { getFriendlyBackendErrorMessage, getGuestResultCopy } from "../lib/errorMessages";
 import "./GuestCheckinPage.css";
@@ -9,6 +10,14 @@ import "./GuestCheckinPage.css";
 const SCAN_INTERVAL_MS = 2200;
 const SUCCESS_COOLDOWN_SECONDS = 5;
 const MAX_HISTORY_ITEMS = 10;
+
+// Màu bounding box theo trạng thái track
+const BOX_COLORS = {
+  detecting: '#00e5ff',    // Cyan
+  recognizing: '#ffa726',  // Amber
+  recognized: '#66bb6a',   // Green
+  unknown: '#ef5350',      // Red
+};
 
 function getTone(status) {
   if (status === "recognized" || status === "already_checked_in") return "success";
@@ -77,12 +86,92 @@ export default function GuestCheckinPage() {
   const [showFallback, setShowFallback] = useState(false);
   const [statusText, setStatusText] = useState("AI đang quét khuôn mặt theo thời gian thực.");
   const inflightRef = useRef(false);
+  const overlayCanvasRef = useRef(null);
+  const overlayRafRef = useRef(null);
 
   const isScanning = scanMode === "scanning" && cooldownSeconds === 0;
   const isPaused = scanMode === "paused";
   const isBusy = submissionState === "loading";
   const cameraReady = cameraState === "ready";
   const copy = useMemo(() => getGuestResultCopy(result), [result]);
+
+  // ── YOLO ONNX Hook ──
+  const {
+    modelState,
+    modelProgress,
+    lastResult: yoloResult,
+    getTracksSnapshot,
+  } = useYoloDetection({
+    videoRef,
+    enabled: isScanning && cameraReady,
+    cameraReady,
+  });
+
+  // Khi YOLO nhận diện được kết quả mới → cập nhật UI
+  useEffect(() => {
+    if (!yoloResult) return;
+    applyResult(yoloResult);
+  }, [yoloResult]);
+
+  // ── Vẽ Bounding Box Overlay ──
+  const drawOverlay = useCallback(() => {
+    const canvas = overlayCanvasRef.current;
+    const video = videoRef.current;
+    if (!canvas || !video) return;
+
+    const vw = video.videoWidth || 640;
+    const vh = video.videoHeight || 480;
+    canvas.width = vw;
+    canvas.height = vh;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, vw, vh);
+
+    if (modelState !== 'ready') return;
+
+    const tracks = getTracksSnapshot();
+    for (const track of tracks) {
+      const { box, state, result: trackResult } = track;
+      const color = BOX_COLORS[state] || BOX_COLORS.detecting;
+
+      // Vẽ box
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1);
+
+      // Nhãn tên
+      const label = state === 'recognized' && trackResult?.full_name
+        ? trackResult.full_name
+        : state === 'recognizing'
+          ? 'Đang xác nhận...'
+          : state === 'unknown'
+            ? 'Không xác định'
+            : '';
+
+      if (label) {
+        ctx.font = '14px system-ui, sans-serif';
+        const tw = ctx.measureText(label).width;
+        ctx.fillStyle = color;
+        ctx.fillRect(box.x1, box.y1 - 22, tw + 10, 22);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(label, box.x1 + 5, box.y1 - 6);
+      }
+    }
+  }, [modelState, getTracksSnapshot, videoRef]);
+
+  // Loop vẽ overlay bằng requestAnimationFrame
+  useEffect(() => {
+    if (!cameraReady || modelState !== 'ready') return;
+
+    const tick = () => {
+      drawOverlay();
+      overlayRafRef.current = requestAnimationFrame(tick);
+    };
+    overlayRafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (overlayRafRef.current) cancelAnimationFrame(overlayRafRef.current);
+    };
+  }, [cameraReady, modelState, drawOverlay]);
 
   useEffect(() => () => stopCamera(), [stopCamera]);
 
@@ -240,6 +329,33 @@ export default function GuestCheckinPage() {
         <div className="kiosk-camera-panel panel-dark">
           <div className="kiosk-camera-stage">
             <video ref={videoRef} className="kiosk-video" autoPlay playsInline muted />
+            <canvas
+              ref={overlayCanvasRef}
+              className="kiosk-detection-canvas"
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                pointerEvents: 'none',
+              }}
+            />
+            {modelState === 'loading' ? (
+              <div className="overlay-message" style={{ zIndex: 20 }}>
+                <strong>Đang nạp AI Nhận Diện...</strong>
+                <div style={{ width: '80%', height: 6, background: 'rgba(255,255,255,0.15)', borderRadius: 3, margin: '12px auto' }}>
+                  <div style={{ width: `${modelProgress}%`, height: '100%', background: '#00e5ff', borderRadius: 3, transition: 'width 0.3s' }} />
+                </div>
+                <p style={{ fontSize: '0.85rem', opacity: 0.7 }}>{modelProgress}% — Tải model YOLOv12 ({'>'}10MB)</p>
+              </div>
+            ) : null}
+            {modelState === 'error' ? (
+              <div className="overlay-message" style={{ zIndex: 20 }}>
+                <strong>Lỗi nạp AI</strong>
+                <p>Không tải được model ONNX. Hệ thống sẽ dùng luồng quét cũ.</p>
+              </div>
+            ) : null}
             <div className={`kiosk-overlay ${cameraReady ? "" : "is-error"} ${isPaused ? "is-paused" : ""}`}>
               <div className="face-box">
                 <span />

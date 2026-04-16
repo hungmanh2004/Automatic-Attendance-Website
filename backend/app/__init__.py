@@ -38,7 +38,10 @@ def _initialize_database(app):
     from . import models  # noqa: F401
 
     with app.app_context():
-        db.create_all()
+        try:
+            db.create_all()
+        except Exception:
+            db.session.rollback()
         _run_schema_updates()
 
 
