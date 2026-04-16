@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ApiError, getFaceSamples } from "../lib/api";
+import { ApiError, enrollEmployeeFacesBatch, getFaceSamples } from "../lib/api";
 import {
   analyzeDetectedFace,
   captureFrame,
@@ -10,7 +10,6 @@ import {
   startCamera,
   stopCamera,
 } from "../lib/cameraService";
-import { registerEmployeeFaceIdentity } from "../lib/faceApiService";
 
 export const FACE_REGISTRATION_STEPS = [
   { id: "straight", title: "Nhìn thẳng", description: "Giữ khuôn mặt ở giữa khung và nhìn trực diện vào camera." },
@@ -125,7 +124,7 @@ export function useFaceRegistration(employeeId, { onUnauthenticated } = {}) {
     setGuidance("Đang gửi dữ liệu khuôn mặt");
 
     try {
-      await registerEmployeeFaceIdentity(employee.id || employeeId, captures, batchFramesRef.current);
+      await enrollEmployeeFacesBatch(employeeId, captures, batchFramesRef.current);
       setSaveState("success");
       setSaveMessage(`Đã tự động lưu bộ khuôn mặt nhân viên từ ${batchFramesRef.current.length} khung hình.`);
       setStatus("upload-success");

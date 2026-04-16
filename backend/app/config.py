@@ -17,3 +17,19 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_PERMANENT = False
+
+    # Attendance
+    ON_TIME_HOUR = 9
+    ON_TIME_MINUTE = 0
+
+    # Face enrollment
+    FACE_SAMPLES_PER_ENROLLMENT = 5
+    FACE_BATCH_MIN_FRAMES = 20
+    FACE_BATCH_MAX_FRAMES = 30
+
+    # Recognition
+    FACE_MATCH_THRESHOLD = 0.6
+
+    # Rate limiting
+    GUEST_RATE_LIMIT_MAX_REQUESTS = 10
+    GUEST_RATE_LIMIT_WINDOW_SECONDS = 60

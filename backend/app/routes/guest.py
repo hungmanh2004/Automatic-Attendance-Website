@@ -10,17 +10,38 @@ logger = logging.getLogger(__name__)
 
 guest_bp = Blueprint("guest", __name__)
 
-_guest_rate_limiter = RateLimiter(max_requests=10, window_seconds=60)
+# Lazily initialised on first request so Config is available
+_guest_rate_limiter = None
+
+
+def _get_rate_limiter():
+    global _guest_rate_limiter
+    if _guest_rate_limiter is None:
+        _guest_rate_limiter = RateLimiter(
+            max_requests=current_app.config.get("GUEST_RATE_LIMIT_MAX_REQUESTS", 10),
+            window_seconds=current_app.config.get("GUEST_RATE_LIMIT_WINDOW_SECONDS", 60),
+        )
+    return _guest_rate_limiter
+
+
+ALLOWED_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "bmp", "webp"}
+
+
+def _allowed_image(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
 
 
 @guest_bp.post("/guest/checkin")
 def guest_checkin():
-    if _guest_rate_limiter.is_limited(request.remote_addr):
+    if _get_rate_limiter().is_limited(request.remote_addr):
         return jsonify({"status": "rate_limited", "message": "Too many requests. Please wait."}), 429
 
     frame = request.files.get("frame")
     if frame is None or not frame.filename:
         return invalid_request("frame is required")
+
+    if not _allowed_image(frame.filename):
+        return invalid_request("frame must be a JPEG, PNG, BMP, or WebP image")
 
     frame_bytes = frame.read()
     if not frame_bytes:
@@ -48,13 +69,16 @@ def guest_checkin_kpts():
         kpts: JSON string, mảng 10 số [x0,y0, x1,y1, ..., x4,y4]
               (tọa độ local trong ảnh crop).
     """
-    if _guest_rate_limiter.is_limited(request.remote_addr):
+    if _get_rate_limiter().is_limited(request.remote_addr):
         return jsonify({"status": "rate_limited", "message": "Too many requests. Please wait."}), 429
 
     # --- Validate crop image ---
     crop = request.files.get("crop")
     if crop is None or not crop.filename:
         return invalid_request("crop is required")
+
+    if not _allowed_image(crop.filename):
+        return invalid_request("crop must be a JPEG, PNG, BMP, or WebP image")
 
     crop_bytes = crop.read()
     if not crop_bytes:

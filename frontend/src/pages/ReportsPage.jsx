@@ -21,6 +21,7 @@ export default function ReportsPage() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [pagination, setPagination] = useState({ page: 1, per_page: 50, total: 0, pages: 0 });
 
   useEffect(() => {
     let cancelled = false;
@@ -29,10 +30,21 @@ export default function ReportsPage() {
       setLoading(true);
       setError("");
       try {
-        const [dashboardPayload, attendancePayload] = await Promise.all([fetchDashboardSummary(), listAttendance({})]);
+        // Request a large batch for report export.
+        const [dashboardPayload, attendancePayload] = await Promise.all([
+          fetchDashboardSummary(),
+          listAttendance({ page: 1, per_page: 200 }),
+        ]);
         if (cancelled) return;
         setDashboard(dashboardPayload);
-        setRecords(attendancePayload.records || []);
+        const recs = attendancePayload?.records || []
+        setRecords(recs)
+        setPagination({
+          page: attendancePayload?.pagination?.page ?? 1,
+          per_page: attendancePayload?.pagination?.per_page ?? 200,
+          total: attendancePayload?.pagination?.total ?? recs.length,
+          pages: attendancePayload?.pagination?.pages ?? 1,
+        })
       } catch (caughtError) {
         if (caughtError?.status === 401) {
           setUnauthenticated();

@@ -16,9 +16,17 @@ def _find_existing_event(employee_id, checkin_date):
 
 
 def _derive_status(checked_in_at):
+    """Return 'On-time' or 'Late' based on Config.ON_TIME_HOUR / ON_TIME_MINUTE.
+
+    Requires a Flask application context (accesses current_app.config).
+    """
+    from flask import current_app
+
     if checked_in_at is None:
         return 'Unknown'
-    return 'On-time' if checked_in_at.time() <= time(9, 0) else 'Late'
+    hour = current_app.config.get("ON_TIME_HOUR", 9)
+    minute = current_app.config.get("ON_TIME_MINUTE", 0)
+    return 'On-time' if checked_in_at.time() <= time(hour, minute) else 'Late'
 
 
 def _derive_confidence(distance):
@@ -54,7 +62,16 @@ class AttendanceService:
             raise
         return event, True
 
-    def list_attendance_events(self, from_date=None, to_date=None, search=None, department=None, position=None):
+    def list_attendance_events(
+        self,
+        from_date=None,
+        to_date=None,
+        search=None,
+        department=None,
+        position=None,
+        page=1,
+        per_page=50,
+    ):
         query = (
             db.session.query(AttendanceEvent, Employee)
             .join(Employee, AttendanceEvent.employee_id == Employee.id)
@@ -83,7 +100,21 @@ class AttendanceService:
         if normalized_position:
             query = query.filter(Employee.position == normalized_position)
 
-        return query.order_by(AttendanceEvent.checked_in_at.desc(), AttendanceEvent.id.desc()).all()
+        total = query.count()
+        offset = (page - 1) * per_page
+        records = (
+            query.order_by(AttendanceEvent.checked_in_at.desc(), AttendanceEvent.id.desc())
+            .offset(offset)
+            .limit(per_page)
+            .all()
+        )
+        return {
+            "records": records,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "pages": (total + per_page - 1) // per_page if per_page > 0 else 0,
+        }
 
     def get_dashboard_summary(self, now=None):
         now = now or datetime.now()
@@ -126,20 +157,30 @@ class AttendanceService:
             events_by_employee[event.employee_id].append(event)
 
         employee_stats = []
-        days_passed = today.day
         for employee in employees:
             events = events_by_employee[employee.id]
             total_days_worked = len(events)
             on_time_count = sum(1 for event in events if _derive_status(event.checked_in_at) == 'On-time')
             late_count = sum(1 for event in events if _derive_status(event.checked_in_at) == 'Late')
-            absent_count = max(days_passed - total_days_worked, 0)
+
+            # days_worked: count calendar days from the later of (month start, employee creation)
+            # NOT from day 1 — new employees joining mid-month should not be penalised
+            created_date = employee.created_at.date()
+            if created_date < month_start:
+                # employee existed before this month: count all days up to today
+                effective_day_1 = 1
+            else:
+                # employee created within this month: only count from their start day
+                effective_day_1 = created_date.day
+            days_worked_in_month = today.day - effective_day_1 + 1
+            absent_count = max(days_worked_in_month - total_days_worked, 0)
             employee_stats.append(
                 {
                     'id': employee.id,
                     'employee_code': employee.employee_code,
                     'full_name': employee.full_name,
-                    'department': employee.department or 'VÄƒn phÃ²ng',
-                    'position': employee.position or 'Nhan vien',
+                    'department': employee.department or 'Văn phòng',
+                    'position': employee.position or 'Nhân viên',
                     'is_active': employee.is_active,
                     'total_days_worked': total_days_worked,
                     'on_time_count': on_time_count,

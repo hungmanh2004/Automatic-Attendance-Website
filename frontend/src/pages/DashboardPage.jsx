@@ -61,13 +61,21 @@ export default function DashboardPage() {
 
   const summary = dashboard?.summary || {};
   const dailyLog = dashboard?.daily_log || [];
+  const employeeStats = dashboard?.employee_stats || [];
   const bars = useMemo(() => {
-    const total = Math.max(summary.total_employees || 0, summary.monthly_attendance_count || 0, 1);
-    return chartDays.map((day, index) => ({
-      day,
-      value: getTrendValue((summary.checked_in_today || 0) + index * 2, total + 12),
-    }));
-  }, [summary.checked_in_today, summary.monthly_attendance_count, summary.total_employees]);
+    // Use real employee_stats to show each employee's total days worked.
+    // Display at most 7 bars to match the chart layout; cap at 31 (one per day).
+    const stats = employeeStats.slice(0, 7)
+    if (stats.length === 0) {
+      return chartDays.map((day) => ({ label: day, value: 0 }))
+    }
+    const maxDays = Math.max(...stats.map((s) => s.total_days_worked || 0), 1)
+    return stats.map((s) => ({
+      label: s.employee_code || s.full_name?.slice(0, 4) || '?',
+      value: Math.round(((s.total_days_worked || 0) / maxDays) * 100),
+      tooltip: `${s.full_name}: ${s.total_days_worked || 0} ngày làm việc`,
+    }))
+  }, [employeeStats]);
 
   const kpis = [
     {
@@ -131,18 +139,18 @@ export default function DashboardPage() {
               <div className="row-between">
                 <div className="stack-sm">
                   <span className="section-label">Xu hướng chấm công</span>
-                  <h2>Biểu đồ theo ngày trong tuần</h2>
+                  <h2>Biểu đồ theo nhân viên trong tháng</h2>
                 </div>
                 <span className="pill">{summary.monthly_attendance_count ?? 0} bản ghi trong tháng</span>
               </div>
 
               <div className="bar-chart">
                 {bars.map((item) => (
-                  <div key={item.day} className="bar-column">
+                  <div key={item.label} className="bar-column" title={item.tooltip || item.label}>
                     <div className="bar-track">
                       <div className="bar-fill" style={{ height: `${item.value}%` }} />
                     </div>
-                    <span>{item.day}</span>
+                    <span>{item.label}</span>
                   </div>
                 ))}
               </div>
