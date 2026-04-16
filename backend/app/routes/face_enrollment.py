@@ -2,7 +2,7 @@ import json
 import mimetypes
 from pathlib import Path
 
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, current_app, jsonify, request, send_file
 from sqlalchemy.exc import IntegrityError
 
 from ..extensions import db
@@ -15,6 +15,12 @@ from .helpers import (
     invalid_request,
     serialize_face_sample,
 )
+
+ALLOWED_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "bmp", "webp"}
+
+
+def _allowed_image(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
 
 
 face_enrollment_bp = Blueprint("face_enrollment", __name__)
@@ -200,8 +206,9 @@ def manager_employee_face_enrollment(employee_id):
         return jsonify({"status": "face_registration_exists"}), 409
 
     images = request.files.getlist("images")
-    if len(images) != 5:
-        return invalid_request("exactly 5 images are required")
+    expected = current_app.config.get("FACE_SAMPLES_PER_ENROLLMENT", 5)
+    if len(images) != expected:
+        return invalid_request(f"exactly {expected} images are required")
 
     storage_service = get_service("storage_service")
     embedding_service = get_service("embedding_service")
@@ -215,6 +222,10 @@ def manager_employee_face_enrollment(employee_id):
             if image is None or not image.filename:
                 storage_service.remove_employee_face_files(saved_paths)
                 return invalid_request("images are required")
+
+            if not _allowed_image(image.filename):
+                storage_service.remove_employee_face_files(saved_paths)
+                return invalid_request("images must be JPEG, PNG, BMP, or WebP format")
 
             frame_bytes = image.read()
             if not frame_bytes:
@@ -302,8 +313,18 @@ def manager_employee_face_enrollment_batch(employee_id):
         return jsonify({"status": "face_registration_exists"}), 409
 
     frames = request.files.getlist("frames")
+    for frame in frames:
+        if not _allowed_image(frame.filename):
+            return invalid_request("all frames must be JPEG, PNG, BMP, or WebP images")
+
     metadata = request.form.get("metadata")
-    batch_service = FaceBatchEnrollmentService(get_service("embedding_service"))
+    min_frames = current_app.config.get("FACE_BATCH_MIN_FRAMES", 20)
+    max_frames = current_app.config.get("FACE_BATCH_MAX_FRAMES", 30)
+    batch_service = FaceBatchEnrollmentService(
+        get_service("embedding_service"),
+        min_frames=min_frames,
+        max_frames=max_frames,
+    )
 
     try:
         batch_result = batch_service.prepare_batch(frames, metadata=metadata)
@@ -351,12 +372,16 @@ def manager_employee_face_sample_replace(employee_id, sample_index):
     if error_response is not None:
         return error_response
 
-    if sample_index < 1 or sample_index > 5:
-        return invalid_request("sample_index must be between 1 and 5")
+    max_samples = current_app.config.get("FACE_SAMPLES_PER_ENROLLMENT", 5)
+    if sample_index < 1 or sample_index > max_samples:
+        return invalid_request(f"sample_index must be between 1 and {max_samples}")
 
     image = request.files.get("image")
     if image is None or not image.filename:
         return invalid_request("image is required")
+
+    if not _allowed_image(image.filename):
+        return invalid_request("image must be a JPEG, PNG, BMP, or WebP")
 
     frame_bytes = image.read()
     if not frame_bytes:

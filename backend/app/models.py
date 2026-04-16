@@ -22,8 +22,8 @@ class Employee(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     employee_code = db.Column(db.String(64), unique=True, nullable=False, index=True)
     full_name = db.Column(db.String(255), nullable=False)
-    department = db.Column(db.String(255), nullable=False, default="Van phong")
-    position = db.Column(db.String(255), nullable=False, default="Nhan vien")
+    department = db.Column(db.String(255), nullable=False, default="Văn phòng")
+    position = db.Column(db.String(255), nullable=False, default="Nhân viên")
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime, nullable=False, default=_utcnow)
     updated_at = db.Column(

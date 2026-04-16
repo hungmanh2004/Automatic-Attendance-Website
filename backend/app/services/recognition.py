@@ -8,6 +8,18 @@ class RecognitionService:
         self.face_index_service = face_index_service
         self.attendance_service = attendance_service
 
+    def _build_response(self, event, match, created):
+        """Shared response builder used by both process_guest_image and process_crop_image."""
+        return {
+            "status": "recognized" if created else "already_checked_in",
+            "employee_id": match["employee_id"],
+            "employee_code": match["employee_code"],
+            "full_name": match["full_name"],
+            "distance": match["distance"],
+            "checked_in_at": event.checked_in_at.isoformat(),
+            "snapshot_path": event.snapshot_path,
+        }
+
     def process_guest_image(self, frame_bytes, filename=None, content_type=None):
         embeddings = self.embedding_service.extract_embeddings(frame_bytes)
 
@@ -30,15 +42,7 @@ class RecognitionService:
         if not created:
             _cleanup_orphan_snapshot(snapshot_path, event.snapshot_path)
 
-        return {
-            "status": "recognized" if created else "already_checked_in",
-            "employee_id": match["employee_id"],
-            "employee_code": match["employee_code"],
-            "full_name": match["full_name"],
-            "distance": match["distance"],
-            "checked_in_at": event.checked_in_at.isoformat(),
-            "snapshot_path": event.snapshot_path,
-        }
+        return self._build_response(event, match, created)
 
     def process_crop_image(self, crop_bytes, keypoints_list, filename=None):
         """Luồng mới: Frontend YOLO ONNX đã crop + trích keypoints.
@@ -67,15 +71,7 @@ class RecognitionService:
         if not created:
             _cleanup_orphan_snapshot(snapshot_path, event.snapshot_path)
 
-        return {
-            "status": "recognized" if created else "already_checked_in",
-            "employee_id": match["employee_id"],
-            "employee_code": match["employee_code"],
-            "full_name": match["full_name"],
-            "distance": match["distance"],
-            "checked_in_at": event.checked_in_at.isoformat(),
-            "snapshot_path": event.snapshot_path,
-        }
+        return self._build_response(event, match, created)
 
 
 def _cleanup_orphan_snapshot(snapshot_path, persisted_snapshot_path):

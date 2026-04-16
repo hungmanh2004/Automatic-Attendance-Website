@@ -79,9 +79,15 @@ class RedisVectorStore(VectorStore):
     def delete_employee_samples(self, employee_id: int) -> None:
         r = get_redis()
         pattern = f"{_KEY_PREFIX}{employee_id}:*"
-        keys = r.keys(pattern)
-        if keys:
-            r.delete(*keys)
+        # Use SCAN instead of KEYS to avoid O(N) blocking scan over all Redis keys.
+        # SCAN is cursor-based and returns results incrementally without blocking.
+        cursor = 0
+        while True:
+            cursor, keys = r.scan(cursor=cursor, match=pattern, count=100)
+            if keys:
+                r.delete(*keys)
+            if cursor == 0:
+                break
 
     def find_best_match(
         self, embedding: list[float], threshold: float = 0.6

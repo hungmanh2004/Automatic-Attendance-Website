@@ -116,7 +116,7 @@ def test_manager_attendance_defaults_to_today_when_filters_missing(app, client, 
         "department": "",
         "position": "",
     }
-    assert payload["summary"]["total_records"] == 1
+    assert payload["pagination"]["total"] == 1
     assert payload["records"][0]["employee_code"] == "EMP-100"
 
 
@@ -152,7 +152,7 @@ def test_manager_attendance_filters_by_date_range_and_search(app, client, monkey
         "department": "",
         "position": "",
     }
-    assert payload["summary"]["total_records"] == 1
+    assert payload["pagination"]["total"] == 1
     assert payload["records"][0]["employee_code"] == "EMP-201"
     assert payload["records"][0]["full_name"] == "Grace Hopper"
     assert payload["records"][0]["department"] == "Kỹ thuật"
@@ -189,7 +189,7 @@ def test_manager_attendance_filters_by_department_and_position(app, client, monk
         "department": "Kỹ thuật",
         "position": "Kỹ sư",
     }
-    assert payload["summary"]["total_records"] == 1
+    assert payload["pagination"]["total"] == 1
     assert payload["records"][0]["employee_code"] == "EMP-210"
 
 
@@ -211,7 +211,7 @@ def test_manager_attendance_search_matches_employee_code_case_insensitively(app,
 
     assert response.status_code == 200
     payload = response.get_json()
-    assert payload["summary"]["total_records"] == 1
+    assert payload["pagination"]["total"] == 1
     assert payload["records"][0]["employee_code"] == "EMP-303"
 
 

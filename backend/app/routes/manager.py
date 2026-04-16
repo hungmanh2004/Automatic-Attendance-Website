@@ -108,7 +108,7 @@ def manager_create_employee():
     employee_code = normalize_text(payload.get("employee_code"))
     full_name = normalize_text(payload.get("full_name"))
     department = normalize_text(payload.get("department")) or "Văn phòng"
-    position = normalize_text(payload.get("position")) or "Nhan vien"
+    position = normalize_text(payload.get("position")) or "Nhân viên"
     if not employee_code or not full_name:
         return invalid_request("employee_code and full_name are required")
 
@@ -149,7 +149,7 @@ def manager_update_employee(employee_id):
     employee_code = normalize_text(payload.get("employee_code"))
     full_name = normalize_text(payload.get("full_name"))
     department = normalize_text(payload.get("department")) or "Văn phòng"
-    position = normalize_text(payload.get("position")) or "Nhan vien"
+    position = normalize_text(payload.get("position")) or "Nhân viên"
 
     if not employee_code or not full_name:
         return invalid_request("employee_code and full_name are required")
@@ -231,17 +231,26 @@ def manager_attendance():
     search = normalize_text(request.args.get("search"))
     department = normalize_text(request.args.get("department"))
     position = normalize_text(request.args.get("position"))
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 50, type=int)
+    if page < 1:
+        page = 1
+    if per_page < 1 or per_page > 500:
+        per_page = 50
+
     attendance_service = get_service("attendance_service")
-    rows = attendance_service.list_attendance_events(
+    result = attendance_service.list_attendance_events(
         from_date=from_date,
         to_date=to_date,
         search=search,
         department=department,
         position=position,
+        page=page,
+        per_page=per_page,
     )
 
     records = []
-    for event, employee in rows:
+    for event, employee in result["records"]:
         records.append(
             {
                 "id": event.id,
@@ -265,8 +274,11 @@ def manager_attendance():
                 "department": department or "",
                 "position": position or "",
             },
-            "summary": {
-                "total_records": len(records),
+            "pagination": {
+                "page": result["page"],
+                "per_page": result["per_page"],
+                "total": result["total"],
+                "pages": result["pages"],
             },
             "records": records,
         }

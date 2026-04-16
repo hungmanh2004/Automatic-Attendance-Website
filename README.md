@@ -1,87 +1,144 @@
 # Automatic Attendance Website
 
-Ứng dụng web điểm danh bằng khuôn mặt với 2 luồng sử dụng chính:
+Ứng dụng web điểm danh bằng khuôn mặt với 2 luồng chính:
 
-- Nhân viên/khách mở trang guest để quét khuôn mặt bằng camera trình duyệt hoặc tải ảnh lên.
-- Quản lý đăng nhập vào trang manager để tạo nhân viên, đăng ký mẫu khuôn mặt và xem nhật ký điểm danh.
-
-README này đã được cập nhật theo kiến trúc hiện tại của repo. Đây không còn là ứng dụng desktop Python cũ nữa.
+- **Guest**: Nhân viên/khách mở trang `/guest` để quét khuôn mặt bằng camera trình duyệt (YOLO ONNX chạy trong browser) hoặc gửi ảnh đã crop.
+- **Manager**: Đăng nhập tại `/manager` để quản lý nhân viên, đăng ký mẫu khuôn mặt (5 ảnh hoặc batch 20-30 frames), và xem báo cáo điểm danh.
 
 ## Tính năng hiện tại
 
-- Guest check-in bằng webcam trong trình duyệt, tự động quét định kỳ và có fallback tải ảnh khi camera không dùng được.
-- Rate limit cho endpoint guest check-in: 10 request trong 60 giây theo IP.
-- Đăng nhập manager bằng session cookie của Flask.
-- Tạo và xem danh sách nhân viên.
-- Đăng ký khuôn mặt cho nhân viên bằng đúng 5 ảnh mẫu.
-- Kiểm tra lỗi no face / multiple faces ngay trong quá trình đăng ký.
-- Nhận diện khuôn mặt bằng DeepFace với model ArcFace.
-- So khớp embedding bằng cosine distance với ngưỡng mặc định `0.6`.
-- Chỉ tạo 1 bản ghi điểm danh mỗi nhân viên trong mỗi ngày.
-- Lưu snapshot check-in để manager mở lại từ trang attendance.
-- Lọc lịch sử điểm danh theo ngày và tìm theo mã nhân viên / họ tên.
+### Guest check-in
+- Quét tự động bằng webcam qua `FaceDetector` API của trình duyệt (hoặc YOLO ONNX nếu hỗ trợ).
+- YOLO ONNX `yolov12n-face` chạy trực tiếp trong trình duyệt — backend chỉ nhận ảnh đã crop + keypoints, giảm bandwidth đáng kể.
+- Luồng legacy: gửi full frame → backend tự detect + align + embed.
+- Rate limit: 10 request/60 giây/IP (Redis fixed-window).
+- File upload validation: chỉ chấp nhận JPEG, PNG, BMP, WebP.
+
+### Face enrollment
+- **5-ảnh guided**: Camera browser hướng dẫn chụp 5 góc (thẳng, trái, phải, lên, xuống).
+- **Batch (20-30 frames)**: Tự động chọn frame đẹp nhất, scoring theo blur/brightness/pose, deduplicate by cosine distance.
+- Validation client-side: `no_face`, `multiple_faces`, `insufficient_frames`.
+- Redis index được sync ngay sau khi enrollment thành công.
+
+### Face recognition pipeline
+- **YOLOv12 face detection** (`.onnx`): bounding box + 5 facial keypoints (2 mắt, mũi, 2 miệng).
+- **InsightFace BuffaloL**: trích xuất embedding 512 chiều từ ảnh đã align.
+- **Face alignment**: xoay ảnh theo eye keypoints với padding 50%.
+- **Redis RediSearch**: FLAT index, cosine distance, threshold 0.6.
+- Mỗi nhân viên chỉ tạo **1 bản ghi điểm danh/ngày**.
+
+### Manager dashboard & reports
+- KPI: tổng nhân viên, điểm danh hôm nay, đúng giờ/đi muộn, tỷ lệ bao phủ.
+- Bar chart theo số ngày làm việc mỗi nhân viên trong tháng (từ `employee_stats`).
+- Nhật ký điểm danh hôm nay theo thời gian thực.
+- Export CSV cho lịch sử điểm danh và tổng hợp KPI.
+- Pagination cho lịch sử điểm danh (mặc định 50 bản ghi/trang).
+
+### Backend
+- **Flask 3** app factory, SQLAlchemy ORM, SQLite local.
+- **Redis** cho session store, rate limiting, và RediSearch vector index.
+- Magic numbers configurable qua `Config` (giờ điểm danh, số mẫu face, batch frame limits, similarity threshold, rate limit).
+- Bare `except` blocks đã được thay bằng logging.
+- `r.keys()` → `r.scan()` iterator cho Redis để tránh blocking O(N) scan.
 
 ## Kiến trúc tổng quan
 
-### Frontend
+```
+Browser (React)
+  ├── GuestCheckinPage  →  useYoloDetection.js  →  /api/guest/checkin-kpts
+  │                                         (crop + keypoints → backend)
+  ├── ManagerLayout    →  DashboardPage         →  /api/manager/dashboard
+  │                      EmployeeListPage      →  /api/manager/employees
+  │                      EmployeeFaceScannerPage →  /api/manager/employees/:id/face-enrollment/batch
+  │                      AttendancePage         →  /api/manager/attendance
+  └── ReportsPage      →  /api/manager/dashboard + /api/manager/attendance
 
-- React 18
-- Vite
-- React Router
-- Vitest + Testing Library
+Backend (Flask)
+  ├── embedding.py      → YOLOv12 + InsightFace BuffaloL
+  ├── face_alignment.py → cv2.warpAffine (eye-based rotation)
+  ├── redis_vector_store.py → RediSearch FLAT index, cosine KNN
+  ├── face_index.py     → FaceIndexService (wrapper)
+  ├── attendance.py     → AttendanceService (dashboard + records)
+  └── face_batch_enrollment.py → quality scoring, deduplication
 
-### Backend
+Redis
+  └── idx:faces  →  RediSearch vector index (512-dim embeddings)
 
-- Flask 3
-- Flask-SQLAlchemy
-- SQLite local (`backend/data/app.db`)
-- DeepFace / ArcFace
-- OpenCV + NumPy
-
-### Lưu trữ local
-
-- Database: `backend/data/app.db`
-- Ảnh check-in: `backend/data/checkins/<YYYY-MM-DD>/...`
-- Ảnh mẫu khuôn mặt: `backend/data/faces/employee-<id>/...`
-
-## Luồng nghiệp vụ
-
-1. Tạo tài khoản manager.
-2. Đăng nhập trang `/manager/login`.
-3. Tạo nhân viên mới với `employee_code` và `full_name`.
-4. Tải lên đúng 5 ảnh khuôn mặt cho từng nhân viên.
-5. Mở trang `/guest` để quét khuôn mặt bằng camera hoặc gửi ảnh thủ công.
-6. Hệ thống trích xuất embedding, so khớp với bộ mẫu đang hoạt động và ghi nhận check-in nếu hợp lệ.
-7. Manager vào trang attendance để xem danh sách bản ghi và snapshot.
+Storage
+  ├── backend/data/app.db          (SQLite: employees, face_samples, face_embeddings, attendance_events)
+  ├── backend/data/checkins/       (guest check-in snapshots)
+  └── backend/data/faces/          (enrollment face samples)
+```
 
 ## Cấu trúc thư mục
 
 ```text
 .
-|-- .brain/            (Chứa Project Memory & Session State cho AI)
 |-- backend/
 |   |-- app/
+|   |   |-- __init__.py            App factory + service wiring
+|   |   |-- config.py              Config (all magic numbers here)
+|   |   |-- extensions.py          SQLAlchemy db instance
+|   |   |-- models.py              5 SQLAlchemy models
 |   |   |-- routes/
-|   |   |-- services/
-|   |   |-- models.py
-|   |   `-- config.py
-|   |-- tests/
+|   |   |   |-- health.py          GET /api/health
+|   |   |   |-- guest.py           POST /api/guest/checkin, /api/guest/checkin-kpts
+|   |   |   |-- manager.py         CRUD employees, attendance, dashboard
+|   |   |   `-- face_enrollment.py  5-ảnh + batch face enrollment
+|   |   `-- services/
+|   |       |-- auth.py            Session-based manager auth
+|   |       |-- storage.py         File I/O for snapshots & face samples
+|   |       |-- embedding.py        YOLO + InsightFace pipeline
+|   |       |-- face_alignment.py   cv2 eye-based face alignment
+|   |       |-- face_batch_enrollment.py  Batch scoring & selection
+|   |       |-- face_index.py       FaceIndexService (Redis wrapper)
+|   |       |-- redis_vector_store.py  RediSearch vector store
+|   |       |-- vector_store.py    Abstract VectorStore interface
+|   |       |-- recognition.py      Guest recognition orchestrator
+|   |       |-- attendance.py       Attendance records & dashboard
+|   |       |-- redis_client.py     Redis connection singleton
+|   |       `-- rate_limiter.py     Redis fixed-window rate limiter
+|   |-- tests/                     pytest test suite
+|   |-- data/                      SQLite DB + uploaded files (gitignored)
 |   |-- Dockerfile
+|   |-- requirements.txt
 |   `-- run.py
-|-- docs/
-|   |-- plans/         (Kế hoạch thực hiện các phase)
-|   `-- superpowers/   (Đặc tả kỹ thuật & Design Documents)
 |-- frontend/
 |   |-- src/
+|   |   |-- App.jsx                React Router routes
 |   |   |-- pages/
+|   |   |   |-- GuestCheckinPage.jsx     Guest kiosk
+|   |   |   |-- ManagerLoginPage.jsx      Manager login
+|   |   |   |-- DashboardPage.jsx         KPI overview
+|   |   |   |-- EmployeeListPage.jsx      Employee CRUD
+|   |   |   |-- EmployeeFacesPage.jsx    5-ảnh face gallery
+|   |   |   |-- EmployeeFaceScannerPage.jsx  Guided camera enrollment
+|   |   |   |-- AttendancePage.jsx       Attendance log + CSV export
+|   |   |   `-- ReportsPage.jsx          KPI reports + CSV export
 |   |   |-- components/
+|   |   |   |-- ManagerLayout.jsx       Sidebar + nav wrapper
+|   |   |   `-- ProtectedRoute.jsx       Auth guard
 |   |   |-- context/
+|   |   |   `-- ManagerAuthContext.jsx  Auth state provider
+|   |   |-- hooks/
+|   |   |   |-- useGuestCamera.js        Camera access
+|   |   |   |-- useYoloDetection.js      Browser YOLO ONNX inference
+|   |   |   `-- useFaceRegistration.js   Guided enrollment scanner
 |   |   `-- lib/
-|   |-- package.json
+|   |       |-- api.js                 Core API layer (all manager endpoints)
+|   |       |-- attendanceApi.js        Attendance query + pagination
+|   |       |-- guestApi.js            Guest check-in helpers
+|   |       |-- faceApiService.js      Batch face enrollment (re-export)
+|   |       |-- cameraService.js       Browser FaceDetector utilities
+|   |       |-- yoloOnnxService.js     YOLOv12 ONNX inference engine
+|   |       `-- errorMessages.js       Error → human-readable string
 |   `-- vite.config.js
 |-- scripts/
 |   |-- create_manager.py
 |   `-- migrate_redis_vector.py
+|-- docs/
+|   |-- plans/
+|   `-- superpowers/
 |-- docker-compose.yml
 |-- run-local.ps1
 `-- .env.example
@@ -89,26 +146,24 @@ README này đã được cập nhật theo kiến trúc hiện tại của repo
 
 ## Biến môi trường
 
-Copy `.env.example` thành `.env`:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Nội dung hiện tại:
+### Backend `.env`
 
 ```env
 SECRET_KEY=change-me-to-a-random-string
+REDIS_URL=redis://localhost:6379
 ```
 
-`SECRET_KEY` nên được đặt cố định trong môi trường dev/production để session manager không bị mất sau mỗi lần restart.
+### Frontend `.env` (nếu không dùng Docker)
+
+```env
+FRONTEND_API_TARGET=http://127.0.0.1:5000
+FRONTEND_HOST=127.0.0.1
+FRONTEND_PORT=5173
+```
 
 ## Chạy bằng Docker Compose
 
-Đây là cách chạy khớp nhất với cấu hình hiện tại của dự án.
-
 ### Yêu cầu
-
 - Docker Desktop
 - Docker Compose
 
@@ -120,38 +175,40 @@ docker compose up --build
 ```
 
 Sau khi chạy:
+- **Frontend**: `http://localhost:8080`
+- **Guest check-in**: `http://localhost:8080/guest`
+- **Manager login**: `http://localhost:8080/manager/login`
+- **Backend health**: `http://localhost:5000/api/health`
 
-- Frontend: `http://localhost:8080`
-- Guest check-in: `http://localhost:8080/guest`
-- Manager login: `http://localhost:8080/manager/login`
-- Backend health: `http://localhost:5000/api/health`
-
-Lần chạy đầu có thể chậm hơn do container cần cài dependency và tải model/cache phục vụ nhận diện.
+Lần chạy đầu tiên có thể chậm do cài dependency và tải YOLO/InsightFace model.
 
 ### Khi nào cần rebuild
 
-Sử dụng `docker compose up --build` khi các file dependency thay đổi:
+```powershell
+docker compose up --build
+```
+
+Dùng khi thay đổi:
 - `backend/requirements.txt`
 - `frontend/package.json`
 - `Dockerfile`
 
-Với thay đổi source code Python/JS thông thường, chỉ cần:
-- `docker compose up` (khởi động lại containers)
-- `docker compose restart backend` (chỉ restart backend service)
+Với thay đổi source code thông thường, chỉ cần:
+```powershell
+docker compose up          # restart containers
+# hoặc
+docker compose restart backend
+```
 
 ### Tạo tài khoản manager
-
-Trong một terminal khác:
 
 ```powershell
 docker compose exec backend python scripts/create_manager.py --username admin --password abc123
 ```
 
-Nếu tài khoản đã tồn tại, script sẽ in ra `exists:<username>`.
+Script sẽ in `exists:<username>` nếu tài khoản đã tồn tại.
 
 ## Chạy local không dùng Docker
-
-Phù hợp khi bạn muốn debug riêng từng service. Cần lưu ý rằng `frontend/vite.config.js` hiện đang proxy `/api` sang `http://backend:5000`, tương thích tốt với Docker network. Nếu chạy frontend trực tiếp trên máy, hãy đảm bảo target proxy trỏ đúng tới backend host bạn đang dùng.
 
 ### Backend
 
@@ -160,23 +217,24 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r backend/requirements.txt
 Copy-Item .env.example .env
+# Cần Redis đang chạy: redis-server
 python backend/run.py
 ```
 
 ### Frontend
 
 ```powershell
-Set-Location frontend
+cd frontend
 npm install
 npm run dev
 ```
 
-### Script hỗ trợ trên Windows
+Vite proxy: `/api/*` → `http://127.0.0.1:5000` (dev).
 
-Repo có sẵn `run-local.ps1` để mở backend và frontend trong 2 cửa sổ PowerShell riêng:
+### Script Windows
 
 ```powershell
-.\run-local.ps1
+.\run-local.ps1   # mở backend và frontend trong 2 cửa sổ PowerShell
 ```
 
 ## Kiểm thử
@@ -190,34 +248,68 @@ python -m pytest backend/tests -v
 ### Frontend
 
 ```powershell
-Set-Location frontend
+cd frontend
 npm test
 ```
 
-## API và hành vi quan trọng
+## API Endpoints
 
-- `POST /api/guest/checkin`
-  - Nhận file `frame`
-  - Trả về các trạng thái như `recognized`, `already_checked_in`, `unknown`, `no_face`, `multiple_faces`, `rate_limited`
-- `POST /api/manager/login`
-  - Đăng nhập manager
-- `GET /api/manager/employees`
-  - Lấy danh sách nhân viên
-- `POST /api/manager/employees`
-  - Tạo nhân viên mới
-- `GET /api/manager/employees/<id>/face-samples`
-  - Lấy danh sách mẫu khuôn mặt đã đăng ký
-- `POST /api/manager/employees/<id>/face-enrollment`
-  - Đăng ký đúng 5 ảnh khuôn mặt
-- `DELETE /api/manager/employees/<id>/face-samples`
-  - Xóa toàn bộ bộ mẫu đã đăng ký
-- `GET /api/manager/attendance`
-  - Xem lịch sử điểm danh theo bộ lọc ngày / tìm kiếm
+### Guest (không cần auth)
+
+| Method | Endpoint | Body | Response |
+|--------|----------|------|----------|
+| POST | `/api/guest/checkin` | `FormData(frame: JPEG)` | `status: recognized \| unknown \| already_checked_in \| no_face \| multiple_faces \| rate_limited` |
+| POST | `/api/guest/checkin-kpts` | `FormData(crop: JPEG, kpts: JSON)` | Tương tự checkin |
+
+### Manager (session cookie required)
+
+| Method | Endpoint | Body/Params | Response |
+|--------|----------|-------------|----------|
+| POST | `/api/manager/login` | `{username, password}` | `{manager}` |
+| POST | `/api/manager/logout` | — | `{}` |
+| GET | `/api/manager/me` | — | `{manager}` |
+| GET | `/api/manager/dashboard` | — | `{summary, daily_log, employee_stats}` |
+| GET | `/api/manager/employees` | — | `{employees}` |
+| POST | `/api/manager/employees` | `{employee_code, full_name, department?, position?}` | `{employee}` |
+| PUT | `/api/manager/employees/:id` | `{...fields}` | `{employee}` |
+| DELETE | `/api/manager/employees/:id` | — | soft-delete, xóa face index |
+| GET | `/api/manager/employees/:id/face-samples` | — | `{employee, face_samples}` |
+| POST | `/api/manager/employees/:id/face-enrollment` | `FormData(images×5)` | `{employee, face_samples}` |
+| POST | `/api/manager/employees/:id/face-enrollment/batch` | `FormData(frames×N, metadata)` | `{status, face_samples, saved_embedding_count}` |
+| PUT | `/api/manager/employees/:id/face-samples/:idx` | `FormData(image)` | `{employee, face_sample}` |
+| DELETE | `/api/manager/employees/:id/face-samples` | — | `{employee_id, deleted_count}` |
+| GET | `/api/manager/attendance` | `?from=&to=&search=&department=&position=&page=&per_page=` | `{filters, pagination, records}` |
+| GET | `/api/manager/attendance/:id/snapshot` | — | Ảnh JPEG snapshot |
+
+### Pagination
+
+`GET /api/manager/attendance` trả về:
+
+```json
+{
+  "filters": { "from": "2026-04-16", "to": "2026-04-16", "search": "", "department": "", "position": "" },
+  "pagination": { "page": 1, "per_page": 50, "total": 123, "pages": 3 },
+  "records": [
+    {
+      "id": 1,
+      "employee_code": "EMP-001",
+      "full_name": "Nguyễn Văn A",
+      "department": "Văn phòng",
+      "position": "Nhân viên",
+      "checked_in_at": "2026-04-16T08:45:00",
+      "status": "On-time",
+      "distance": 0.12,
+      "snapshot_url": "/api/manager/attendance/1/snapshot"
+    }
+  ]
+}
+```
 
 ## Giới hạn hiện tại
 
-- Mỗi nhân viên hiện chỉ có luồng tạo/xem và đăng ký/xóa bộ mẫu khuôn mặt; chưa có sửa/xóa nhân viên trên giao diện.
-- Face index được refresh từ dữ liệu lưu trữ trong quá trình so khớp.
-- Dự án hiện ưu tiên lưu trữ local bằng SQLite và file hệ thống, chưa có đồng bộ cloud/database ngoài.
-- Frontend local dev cần để ý cấu hình proxy `/api` nếu không chạy qua Docker.
-
+- Mỗi nhân viên chỉ có 1 bản ghi điểm danh/ngày (unique constraint `(employee_id, checkin_date)`).
+- Face index refresh đồng bộ sau enrollment — nếu Redis lỗi sau DB commit có thể không sync.
+- YOLO ONNX model (25 MB) load lần đầu chậm, chưa có lazy-loading strategy.
+- Không có notification/push cho điểm danh thời gian thực qua WebSocket.
+- Chưa có ghi log/audit trail cho thao tác manager.
+- `failed_checkins` và `failed_scans_today` trong dashboard summary luôn = 0 (stub).

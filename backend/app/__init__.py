@@ -1,3 +1,5 @@
+import logging
+
 from pathlib import Path
 
 from flask import Flask
@@ -37,10 +39,13 @@ def _initialize_database(app):
 
     from . import models  # noqa: F401
 
+    logger = logging.getLogger(__name__)
+
     with app.app_context():
         try:
             db.create_all()
-        except Exception:
+        except Exception as e:
+            logger.error("Failed to create database tables: %s", e)
             db.session.rollback()
         _run_schema_updates()
 
@@ -60,12 +65,12 @@ def _run_schema_updates():
 
     if "position" not in employee_columns:
         try:
-            db.session.execute(text("ALTER TABLE employees ADD COLUMN position VARCHAR(255) DEFAULT 'Nhan vien'"))
+            db.session.execute(text("ALTER TABLE employees ADD COLUMN position VARCHAR(255) DEFAULT 'Nhân viên'"))
         except OperationalError as error:
             if "duplicate column name: position" not in str(error):
                 raise
             db.session.rollback()
-        db.session.execute(text("UPDATE employees SET position = 'Nhan vien' WHERE position IS NULL"))
+        db.session.execute(text("UPDATE employees SET position = 'Nhân viên' WHERE position IS NULL"))
         db.session.commit()
 
 
