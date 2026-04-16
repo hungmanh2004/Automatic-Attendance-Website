@@ -490,6 +490,73 @@ def test_face_sample_replace_updates_existing_slot_and_refreshes_index(app, clie
         assert sample.embedding_json == "[0.9, 0.2, 0.3]"
 
 
+def test_face_sample_replace_removes_batch_embeddings_for_that_employee(app, client):
+    manager = _create_manager(app)
+    employee = _create_employee(app, employee_code="EMP-312A", full_name="Replace Batch Enrollment")
+    _login_manager(client, manager)
+
+    refresh_calls = {"count": 0}
+
+    class FakeEmbeddingService:
+        def extract_embeddings(self, frame_bytes):
+            assert frame_bytes == b"replacement-face"
+            return [[0.91, 0.22, 0.33]]
+
+    class FakeFaceIndexService:
+        def refresh(self):
+            refresh_calls["count"] += 1
+
+    app.extensions["embedding_service"] = FakeEmbeddingService()
+    app.extensions["face_index_service"] = FakeFaceIndexService()
+
+    with app.app_context():
+        image_path = tmp_path_sample_path(app, employee["id"], 3)
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        image_path.write_bytes(b"old-face")
+        db.session.add(
+            FaceSample(
+                employee_id=employee["id"],
+                sample_index=3,
+                image_path=str(image_path),
+                embedding_json="[0.1, 0.2, 0.3]",
+            )
+        )
+        db.session.add_all(
+            [
+                FaceEmbedding(
+                    employee_id=employee["id"],
+                    embedding_role="mean",
+                    pose_label="aggregate",
+                    embedding_json="[0.3, 0.3, 0.3]",
+                ),
+                FaceEmbedding(
+                    employee_id=employee["id"],
+                    embedding_role="representative",
+                    pose_label="front",
+                    quality_score=0.82,
+                    embedding_json="[0.4, 0.4, 0.4]",
+                ),
+            ]
+        )
+        db.session.commit()
+
+    response = client.put(
+        f"/api/manager/employees/{employee['id']}/face-samples/3",
+        data={"image": (BytesIO(b"replacement-face"), "3.jpg")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    assert refresh_calls["count"] == 1
+
+    with app.app_context():
+        sample = FaceSample.query.filter_by(employee_id=employee["id"], sample_index=3).one()
+        embedding_rows = FaceEmbedding.query.filter_by(employee_id=employee["id"]).all()
+        assert Path(sample.image_path).read_bytes() == b"replacement-face"
+        assert sample.embedding_json == "[0.91, 0.22, 0.33]"
+        assert embedding_rows == []
+
+
 def test_face_sample_replace_creates_missing_slot(app, client):
     manager = _create_manager(app)
     employee = _create_employee(app, employee_code="EMP-313", full_name="Create Slot")

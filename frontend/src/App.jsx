@@ -1,7 +1,8 @@
-﻿import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { ManagerAuthProvider } from "./context/ManagerAuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ManagerLayout from "./components/ManagerLayout";
+import LandingPage from "./pages/LandingPage";
 import GuestCheckinPage from "./pages/GuestCheckinPage";
 import ManagerLoginPage from "./pages/ManagerLoginPage";
 import EmployeeListPage from "./pages/EmployeeListPage";
@@ -15,7 +16,7 @@ export function App() {
   return (
     <ManagerAuthProvider>
       <Routes>
-        <Route path="/" element={<GuestCheckinPage />} />
+        <Route path="/" element={<LandingPage />} />
         <Route path="/guest" element={<GuestCheckinPage />} />
         <Route path="/manager/login" element={<ManagerLoginPage />} />
         <Route

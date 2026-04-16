@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useManagerAuth } from "../context/ManagerAuthContext";
 import { listAttendance } from "../lib/attendanceApi";
 import { getEmployees } from "../lib/api";
+import { exportExcelFile } from "../lib/reportExport";
 import "./AttendancePage.css";
 
 function formatDate(value) {
@@ -50,7 +51,7 @@ function getConfidence(record) {
   return `${Math.max(0, Math.min(100, Math.round((1 - record.distance) * 1000) / 10))}%`;
 }
 
-function exportCsv(records) {
+function buildExportRows(records) {
   const header = ["Mã nhân viên", "Họ tên", "Phòng ban", "Chức vụ", "Thời gian", "Trạng thái", "Độ khớp", "Ảnh chụp"];
   const rows = records.map((record) => [
     record.employee_code,
@@ -62,16 +63,11 @@ function exportCsv(records) {
     getConfidence(record),
     record.snapshot_url || "",
   ]);
-  const csv = [header, ...rows]
-    .map((columns) => columns.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-    .join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = "lich-su-cham-cong-guardian-ai.csv";
-  anchor.click();
-  URL.revokeObjectURL(url);
+  return [header, ...rows];
+}
+
+function exportAttendanceExcel(records) {
+  exportExcelFile("lich-su-cham-cong-guardian-ai.xls", buildExportRows(records), "Attendance");
 }
 
 export default function AttendancePage() {
@@ -187,9 +183,11 @@ export default function AttendancePage() {
           <h1>Lịch sử chấm công với bộ lọc theo thời gian, phòng ban và chức vụ</h1>
           <p className="text-secondary">Theo dõi sự kiện check-in, độ khớp AI, phòng ban, chức vụ và truy cập nhanh ảnh chụp gốc.</p>
         </div>
-        <button className="btn btn-secondary" type="button" onClick={() => exportCsv(filteredRecords)} disabled={filteredRecords.length === 0}>
-          Tải báo cáo CSV
-        </button>
+        <div className="report-actions">
+          <button className="btn btn-primary" type="button" onClick={() => exportAttendanceExcel(filteredRecords)} disabled={filteredRecords.length === 0}>
+            Tải báo cáo Excel
+          </button>
+        </div>
       </div>
 
       <div className="tab-switch">

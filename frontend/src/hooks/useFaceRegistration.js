@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 
 import { ApiError, getFaceSamples } from "../lib/api";
 import {
@@ -59,10 +59,25 @@ function scoreCandidateFrame(analysis, stepId) {
   return poseBonus * 3 + centeredBonus * 2 + insideBonus * 1.5 + distanceScore * 4 + confidenceScore * 2 - stabilityPenalty;
 }
 
+function getCameraErrorMessage(error) {
+  if (!error) return "Kh?ng th? m? camera.";
+
+  if (error.name === "NotAllowedError") {
+    return "Quy?n camera ?? b? t? ch?i. H?y cho ph?p camera r?i th? l?i.";
+  }
+
+  if (error.name === "NotFoundError") {
+    return "Kh?ng t?m th?y camera tr?n thi?t b? n?y. B?n c? th? d?ng b? 5 ?nh t?nh ?? ??ng k? khu?n m?t.";
+  }
+
+  return error.message || "Kh?ng th? m? camera.";
+}
+
 export function useFaceRegistration(employeeId, { onUnauthenticated } = {}) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const detectorRef = useRef(null);
+  const onUnauthenticatedRef = useRef(onUnauthenticated);
   const analysisIntervalRef = useRef(null);
   const holdStartRef = useRef(null);
   const captureLockRef = useRef(false);
@@ -83,6 +98,7 @@ export function useFaceRegistration(employeeId, { onUnauthenticated } = {}) {
   const [saveMessage, setSaveMessage] = useState("");
   const [saveState, setSaveState] = useState("idle");
   const [batchFrameCount, setBatchFrameCount] = useState(0);
+  const [cameraAttempt, setCameraAttempt] = useState(0);
   const [systemState, setSystemState] = useState({
     cameraActive: false,
     detectorReady: false,
@@ -92,6 +108,10 @@ export function useFaceRegistration(employeeId, { onUnauthenticated } = {}) {
   const activeStep = FACE_REGISTRATION_STEPS[activeStepIndex] || FACE_REGISTRATION_STEPS.at(-1);
   const completedCount = FACE_REGISTRATION_STEPS.filter((step) => captures[step.id]).length;
   const canSave = completedCount === FACE_REGISTRATION_STEPS.length && !isSaving;
+
+  useEffect(() => {
+    onUnauthenticatedRef.current = onUnauthenticated;
+  }, [onUnauthenticated]);
 
   function resetHoldTracking() {
     holdStartRef.current = null;
@@ -133,7 +153,7 @@ export function useFaceRegistration(employeeId, { onUnauthenticated } = {}) {
       setEmployee((current) => ({ ...current, registration_status: "Đã đăng ký" }));
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        onUnauthenticated?.();
+        onUnauthenticatedRef.current?.();
         return;
       }
 
@@ -158,7 +178,7 @@ export function useFaceRegistration(employeeId, { onUnauthenticated } = {}) {
       } catch (error) {
         if (!mounted) return;
         if (error?.status === 401) {
-          onUnauthenticated?.();
+          onUnauthenticatedRef.current?.();
           return;
         }
 
@@ -208,7 +228,7 @@ export function useFaceRegistration(employeeId, { onUnauthenticated } = {}) {
       }
       stopCamera(streamRef.current);
     };
-  }, [employeeId, onUnauthenticated]);
+  }, [cameraAttempt, employeeId]);
 
   useEffect(() => {
     if (!["camera-ready", "scanning", "capturing", "complete", "upload-error"].includes(status)) {
@@ -374,6 +394,24 @@ export function useFaceRegistration(employeeId, { onUnauthenticated } = {}) {
     setSaveState("idle");
   }
 
+  function retryCamera() {
+    resetHoldTracking();
+    autoSubmitTriggeredRef.current = false;
+    stopCamera(streamRef.current);
+    streamRef.current = null;
+    resetBatchFrames();
+    setCaptures(getInitialCaptures());
+    setActiveStepIndex(0);
+    setFaceAnalysis(null);
+    setStatus("initializing");
+    setGuidance("?ang kh?i t?o camera");
+    setWarning("");
+    setSaveMessage("");
+    setSaveState("idle");
+    setSystemState((current) => ({ ...current, cameraActive: false }));
+    setCameraAttempt((current) => current + 1);
+  }
+
   const steps = FACE_REGISTRATION_STEPS.map((step, index) => ({
     ...step,
     status: getStepStatus(index, activeStepIndex, captures),
@@ -401,6 +439,7 @@ export function useFaceRegistration(employeeId, { onUnauthenticated } = {}) {
     isSaving,
     recaptureCurrent,
     resetRegistration,
+    retryCamera,
     saveIdentity,
     saveMessage,
     saveState,

@@ -786,3 +786,20 @@ Tai khoan nay da duoc tao trong backend container dang chay.
 - Sua lai cac chuoi tieng Viet bi mojibake trong hook scanner va API client sau lan ghi file truoc do.
 - Cac nhan nhu `Nh?n th?ng`, `Quay tr?i`, `Nh?n l?n`, thong bao guidance va message upload da hien thi dung UTF-8 tro lai.
 - Verify lai bang `npm run build` va `npm test -- EmployeeFaceScannerPage.test.jsx`: deu pass.
+
+
+## Sua regression sau rebase o luong thay anh mau khuon mat (2026-04-13 12:20:00)
+
+### File lien quan
+
+- `backend/app/routes/face_enrollment.py`
+- `backend/tests/test_manager_face_enrollment_api.py`
+- `.gitignore`
+- `WORKLOG_SINCE_CLONE.md`
+
+### Noi dung
+
+- Sua luong `PUT /api/manager/employees/<id>/face-samples/<sample_index>` de khi admin thay anh mau thi xoa bo `FaceEmbedding` cu cua nhan vien do.
+- Muc tieu la tranh tinh trang matcher van uu tien dung embedding batch cu sau khi UI da doi anh preview.
+- Bo sung regression test cho case thay anh mau sau batch enrollment de khoa lai hanh vi nay.
+- Xoa file rac `.branch.swp` bi commit nham khi rebase va them `*.swp` vao `.gitignore` de tranh lap lai.

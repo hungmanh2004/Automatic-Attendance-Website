@@ -24,7 +24,11 @@ export async function startCamera(videoElement, constraints = DEFAULT_CAMERA_CON
 
   if (videoElement) {
     videoElement.srcObject = stream;
-    await videoElement.play();
+    try {
+      await videoElement.play();
+    } catch {
+      // Ignore autoplay rejections; the assigned stream can still render.
+    }
   }
 
   return stream;

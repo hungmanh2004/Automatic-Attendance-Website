@@ -51,4 +51,5 @@ describe("Employee face scanner page", () => {
     expect(await screen.findByText(/kết nối camera/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /quản lý ảnh tĩnh/i })).toBeInTheDocument();
   });
+
 });

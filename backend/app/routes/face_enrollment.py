@@ -40,6 +40,22 @@ def _delete_face_embeddings_for_employee(employee_id):
     return face_embeddings
 
 
+def _purge_face_embeddings_for_employee(employee_id):
+    removable_paths = []
+    face_embeddings = (
+        FaceEmbedding.query.filter_by(employee_id=employee_id)
+        .order_by(FaceEmbedding.id.asc())
+        .all()
+    )
+
+    for face_embedding in face_embeddings:
+        if face_embedding.image_path:
+            removable_paths.append(face_embedding.image_path)
+        db.session.delete(face_embedding)
+
+    return removable_paths
+
+
 def _delete_face_samples_for_employee(employee_id):
     face_samples = (
         FaceSample.query.filter_by(employee_id=employee_id)
@@ -404,6 +420,7 @@ def manager_employee_face_sample_replace(employee_id, sample_index):
             face_sample.image_path = str(new_image_path)
             face_sample.embedding_json = json.dumps(embeddings[0])
 
+        removable_embedding_paths = _purge_face_embeddings_for_employee(employee.id)
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -412,6 +429,8 @@ def manager_employee_face_sample_replace(employee_id, sample_index):
 
     if old_image_path and old_image_path != str(new_image_path):
         storage_service.remove_path(old_image_path)
+    if removable_embedding_paths:
+        storage_service.remove_employee_face_files(removable_embedding_paths)
 
     face_index_service.upsert(
         employee_id=employee.id,

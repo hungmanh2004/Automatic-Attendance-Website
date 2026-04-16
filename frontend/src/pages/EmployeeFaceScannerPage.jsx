@@ -215,6 +215,17 @@ export default function EmployeeFaceScannerPage() {
                     ))}
                   </div>
 
+                  {registration.status === "camera-error" ? (
+                    <div className="simple-info-actions">
+                      <button type="button" className="simple-info-btn is-primary" onClick={registration.retryCamera}>
+                        Th? l?i camera
+                      </button>
+                      <Link className="simple-info-btn" to={`/manager/employees/${employeeId}/faces`}>
+                        D?ng 5 ?nh t?nh
+                      </Link>
+                    </div>
+                  ) : null}
+
                   {canRetrySave ? (
                     <div className="simple-info-actions">
                       <button type="button" className="simple-info-btn is-primary" onClick={() => registration.saveIdentity()}>

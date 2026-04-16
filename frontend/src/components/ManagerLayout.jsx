@@ -1,30 +1,31 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { LayoutDashboard, Users, ClipboardCheck, FileSpreadsheet, LogOut } from "lucide-react";
 
 import { useManagerAuth } from "../context/ManagerAuthContext";
 
 const navItems = [
   {
     to: "/manager/dashboard",
-    icon: "AI",
+    icon: LayoutDashboard,
     label: "Tổng quan",
     description: "KPI, xu hướng và cảnh báo thời gian thực",
   },
   {
     to: "/manager/employees",
-    icon: "HR",
+    icon: Users,
     label: "Nhân viên",
     description: "Hồ sơ, hiệu suất và khuôn mặt",
   },
   {
     to: "/manager/attendance",
-    icon: "LOG",
+    icon: ClipboardCheck,
     label: "Chấm công",
     description: "Lịch sử, bộ lọc và ảnh camera",
   },
   {
     to: "/manager/reports",
-    icon: "CSV",
+    icon: FileSpreadsheet,
     label: "Báo cáo",
     description: "Xuất dữ liệu và thống kê kỳ",
   },
@@ -77,19 +78,26 @@ export default function ManagerLayout() {
         </div>
 
         <nav className="manager-nav" aria-label="Điều hướng quản trị">
-          {navItems.map((item) => (
-            <NavLink key={item.to} to={item.to}>
-              <span className="nav-icon">{item.icon}</span>
-              <span className="nav-copy">
-                <strong>{item.label}</strong>
-                <span>{item.description}</span>
-              </span>
-            </NavLink>
-          ))}
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink key={item.to} to={item.to}>
+                <span className="nav-icon">
+                  <Icon size={20} />
+                </span>
+                <span className="nav-copy">
+                  <strong>{item.label}</strong>
+                  <span>{item.description}</span>
+                </span>
+              </NavLink>
+            );
+          })}
         </nav>
 
         <button type="button" className="manager-logout" onClick={() => void handleLogout()}>
-          <span className="nav-icon">OUT</span>
+          <span className="nav-icon">
+            <LogOut size={20} />
+          </span>
           <span className="nav-copy">
             <strong>Đăng xuất</strong>
             <span>Kết thúc phiên quản trị hiện tại</span>
@@ -103,3 +111,4 @@ export default function ManagerLayout() {
     </div>
   );
 }
+

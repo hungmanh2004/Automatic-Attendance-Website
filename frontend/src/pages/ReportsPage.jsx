@@ -3,16 +3,13 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchDashboardSummary } from "../lib/api";
 import { listAttendance } from "../lib/attendanceApi";
 import { useManagerAuth } from "../context/ManagerAuthContext";
+import { exportExcelFile } from "../lib/reportExport";
 
-function exportFile(filename, rows) {
-  const csv = rows.map((columns) => columns.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
+function buildAttendanceRows(records) {
+  return [
+    ["Mã nhân viên", "Họ và tên", "Thời gian điểm danh", "Ảnh chụp"],
+    ...records.map((record) => [record.employee_code, record.full_name, record.checked_in_at, record.snapshot_url || ""]),
+  ];
 }
 
 export default function ReportsPage() {
@@ -62,15 +59,12 @@ export default function ReportsPage() {
     ];
   }, [dashboard]);
 
-  function handleExportAll() {
-    exportFile("bao-cao-lich-su-guardian-ai.csv", [
-      ["Mã nhân viên", "Họ và tên", "Thời gian điểm danh", "Ảnh chụp"],
-      ...records.map((record) => [record.employee_code, record.full_name, record.checked_in_at, record.snapshot_url || ""]),
-    ]);
+  function handleExportAllExcel() {
+    exportExcelFile("bao-cao-lich-su-guardian-ai.xls", buildAttendanceRows(records), "AttendanceHistory");
   }
 
-  function handleExportSummary() {
-    exportFile("tong-hop-kpi-guardian-ai.csv", [["Chỉ số", "Giá trị"], ...cards]);
+  function handleExportSummaryExcel() {
+    exportExcelFile("tong-hop-kpi-guardian-ai.xls", [["Chỉ số", "Giá trị"], ...cards], "KPISummary");
   }
 
   return (
@@ -79,7 +73,7 @@ export default function ReportsPage() {
         <div className="page-header-info">
           <span className="section-label">Trung tâm báo cáo</span>
           <h1>Trung tâm báo cáo và xuất dữ liệu</h1>
-          <p className="text-secondary">Tạo gói CSV nhanh cho KPI tổng quan và lịch sử camera để chia sẻ với vận hành hoặc nhân sự.</p>
+          <p className="text-secondary">Tạo gói Excel cho KPI tổng quan và lịch sử camera để chia sẻ với vận hành hoặc nhân sự.</p>
         </div>
       </div>
 
@@ -107,15 +101,15 @@ export default function ReportsPage() {
               <div className="stack-sm">
                 <span className="section-label">Khu xuất dữ liệu</span>
                 <h2>Tập lệnh xuất báo cáo</h2>
-                <p className="text-secondary">Chọn loại file cần chia sẻ và tải về ngay lập tức theo dữ liệu hiện có trong hệ thống.</p>
+                <p className="text-secondary">Chọn loại file Excel cần chia sẻ và tải về ngay lập tức theo dữ liệu hiện có trong hệ thống.</p>
               </div>
 
               <div className="report-actions">
-                <button type="button" className="btn btn-primary" onClick={handleExportAll}>
-                  Tải lịch sử CSV
+                <button type="button" className="btn btn-primary" onClick={handleExportAllExcel}>
+                  Tải lịch sử Excel
                 </button>
-                <button type="button" className="btn btn-secondary" onClick={handleExportSummary}>
-                  Tải tổng hợp KPI
+                <button type="button" className="btn btn-secondary" onClick={handleExportSummaryExcel}>
+                  Tải tổng hợp KPI Excel
                 </button>
               </div>
             </article>

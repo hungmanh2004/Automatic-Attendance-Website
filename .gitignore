@@ -1,6 +1,7 @@
 .env
 .env.example
 .pytest_cache
+*.swp
 credentials.json
 /stored-faces
 /__pycache__

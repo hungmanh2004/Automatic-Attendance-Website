@@ -108,7 +108,7 @@ def manager_create_employee():
     employee_code = normalize_text(payload.get("employee_code"))
     full_name = normalize_text(payload.get("full_name"))
     department = normalize_text(payload.get("department")) or "Văn phòng"
-    position = normalize_text(payload.get("position")) or "Nhan vien"
+    position = normalize_text(payload.get("position")) or "Nhân Viên"
     if not employee_code or not full_name:
         return invalid_request("employee_code and full_name are required")
 
