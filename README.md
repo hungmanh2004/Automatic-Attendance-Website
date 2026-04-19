@@ -199,6 +199,11 @@ docker compose up          # restart containers
 # hoặc
 docker compose restart backend
 ```
+Nếu sửa frontend thì còn phải
+```
+cd frontend
+npm run build
+```
 
 ### Tạo tài khoản manager
 

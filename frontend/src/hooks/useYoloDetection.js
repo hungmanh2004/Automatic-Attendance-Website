@@ -243,14 +243,24 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
       const bw = det.box.x2 - det.box.x1
       const bh = det.box.y2 - det.box.y1
       const faceArea = bw * bh
-      if (faceArea / frameArea < MIN_FACE_AREA_RATIO) continue
+      if (faceArea / frameArea < MIN_FACE_AREA_RATIO) {
+        console.warn(`[Track#${id}] SKIP: faceArea ${(faceArea/frameArea).toFixed(4)} < min ${MIN_FACE_AREA_RATIO}`)
+        continue
+      }
 
       // Kiểm tra confidence
-      if (det.score < MIN_CONFIDENCE) continue
+      if (det.score < MIN_CONFIDENCE) {
+        console.warn(`[Track#${id}] SKIP: score ${det.score.toFixed(3)} < min ${MIN_CONFIDENCE}`)
+        continue
+      }
 
       // Kiểm tra stable frames
-      if (track.stableFrames < STABLE_FRAMES_REQUIRED) continue
+      if (track.stableFrames < STABLE_FRAMES_REQUIRED) {
+        console.warn(`[Track#${id}] SKIP: stableFrames ${track.stableFrames} < required ${STABLE_FRAMES_REQUIRED}`)
+        continue
+      }
 
+      console.warn(`[Track#${id}] TRIGGER → backend (score=${det.score.toFixed(3)}, areaRatio=${(faceArea/frameArea).toFixed(4)})`)
       // ĐỦ ĐIỀU KIỆN → Gửi crop!
       track.cooldownUntil = Date.now() + COOLDOWN_MS
       sendCropToBackend(id, videoEl, det)
@@ -280,6 +290,9 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
         if (videoEl && videoEl.readyState >= 2 && workCanvasRef.current) {
           try {
             const dets = await detectFaces(videoEl, workCanvasRef.current)
+            if (dets.length > 0) {
+              console.warn(`[detectFaces] ✓ ${dets.length} face(s) detected`)
+            }
             setDetections(dets)
             updateTracks(dets, videoEl)
           } catch (err) {
@@ -312,6 +325,9 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
         result: track.result,
         score: track.lastDetection?.score || 0,
       })
+    }
+    if (result.length > 0) {
+      console.warn(`[tracks] ${result.length} track(s):`, result.map(t => `#${t.id} state=${t.state} box=(${t.box?.x1?.toFixed(0)},${t.box?.y1?.toFixed(0)}) score=${t.score.toFixed(3)}`))
     }
     return result
   }, [])

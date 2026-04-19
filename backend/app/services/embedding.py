@@ -155,9 +155,9 @@ class EmbeddingService:
 
             face_analysis_module = importlib.import_module("insightface.app")
             face_analysis_class = face_analysis_module.FaceAnalysis
+            # insightface 0.2.1 không hỗ trợ providers= — chỉ dùng ctx_id trong .prepare()
             app = face_analysis_class(
                 name=self._insightface_model_name,
-                providers=self._insightface_providers,
             )
             app.prepare(ctx_id=ctx_id, det_size=self._insightface_det_size)
 

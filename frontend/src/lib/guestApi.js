@@ -45,6 +45,8 @@ export async function captureGuestFrame(videoElement) {
 
   const context = canvas.getContext('2d')
   if (context) {
+    context.translate(canvas.width, 0)
+    context.scale(-1, 1)
     context.drawImage(videoElement, 0, 0, canvas.width, canvas.height)
   }
 

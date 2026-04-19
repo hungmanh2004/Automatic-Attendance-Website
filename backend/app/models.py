@@ -33,13 +33,30 @@ class Employee(db.Model):
         onupdate=_utcnow,
     )
 
+    face_samples = db.relationship(
+        "FaceSample",
+        back_populates="employee",
+        cascade="all, delete-orphan",
+    )
+    face_embeddings = db.relationship(
+        "FaceEmbedding",
+        back_populates="employee",
+        cascade="all, delete-orphan",
+    )
+    attendance_events = db.relationship(
+        "AttendanceEvent",
+        back_populates="employee",
+        cascade="all, delete-orphan",
+    )
+
 
 class FaceSample(db.Model):
     __tablename__ = "face_samples"
     __table_args__ = (db.UniqueConstraint("employee_id", "sample_index", name="uq_employee_sample_index"),)
 
     id = db.Column(db.Integer, primary_key=True)
-    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id"), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    employee = db.relationship("Employee", back_populates="face_samples")
     sample_index = db.Column(db.Integer, nullable=False)
     image_path = db.Column(db.String(512), nullable=False)
     embedding_json = db.Column(db.Text, nullable=False)
@@ -50,7 +67,8 @@ class FaceEmbedding(db.Model):
     __tablename__ = "face_embeddings"
 
     id = db.Column(db.Integer, primary_key=True)
-    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id"), nullable=False, index=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee = db.relationship("Employee", back_populates="face_embeddings")
     embedding_role = db.Column(db.String(32), nullable=False, default="representative")
     pose_label = db.Column(db.String(32), nullable=True)
     quality_score = db.Column(db.Float, nullable=True)
@@ -64,7 +82,8 @@ class AttendanceEvent(db.Model):
     __table_args__ = (db.UniqueConstraint("employee_id", "checkin_date", name="uq_employee_checkin_date"),)
 
     id = db.Column(db.Integer, primary_key=True)
-    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id"), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    employee = db.relationship("Employee", back_populates="attendance_events")
     checked_in_at = db.Column(db.DateTime, nullable=False)
     checkin_date = db.Column(db.String(10), nullable=False)
     snapshot_path = db.Column(db.String(512), nullable=False)

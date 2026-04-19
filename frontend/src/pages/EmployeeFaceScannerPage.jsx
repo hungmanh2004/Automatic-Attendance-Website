@@ -1,242 +1,238 @@
-﻿import "./EmployeeFaceScannerPage.override.css";
+import "./EmployeeFaceScannerPage.override.css";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useManagerAuth } from "../context/ManagerAuthContext";
 import { useFaceRegistration } from "../hooks/useFaceRegistration";
 
-function getStatusItems(systemState, faceAnalysis) {
-  return [
-    {
-      label: "Ánh sáng",
-      value: systemState.cameraActive ? "Tối ưu" : "Chưa sẵn sàng",
-      tone: systemState.cameraActive ? "success" : "neutral",
-    },
-    {
-      label: "Khoảng cách",
-      value: faceAnalysis?.isTooFar ? "Điều chỉnh" : "Ổn định",
-      tone: faceAnalysis?.isTooFar ? "warning" : "success",
-    },
-    {
-      label: "Khuôn mặt",
-      value: faceAnalysis ? "Đã nhận" : "Đang chờ",
-      tone: faceAnalysis ? "success" : "neutral",
-    },
-  ];
-}
-
-function getScannerCopy(registration) {
-  const { status, guidance, systemState, completedCount, isSaving, saveState, activeStep } = registration;
-
-  if (status === "camera-error") {
-    return {
-      eyebrow: "Camera chưa sẵn sàng",
-      title: "Không thể khởi tạo camera",
-      description: "Kiểm tra quyền truy cập camera rồi thử lại sau.",
-    };
+function ActionPanel({ sessionStatus, acceptedCount, targetCount, canStart, errorMessage, onStart, onReset }) {
+  if (sessionStatus === "success") {
+    return (
+      <div className="reg-success-banner">
+        <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+          <polyline points="22 4 12 14.01 9 11.01" />
+        </svg>
+        <span>Hoàn tất đăng ký khuôn mặt</span>
+      </div>
+    );
   }
 
-  if (isSaving || status === "uploading") {
-    return {
-      eyebrow: "Đang đồng bộ dữ liệu",
-      title: "Đang lưu bộ khuôn mặt",
-      description: "Hệ thống đang gửi ảnh đã ghi nhận lên máy chủ.",
-    };
+  if (sessionStatus === "uploading") {
+    return (
+      <div className="reg-processing-panel">
+        <div className="reg-spinner-ring" />
+        <div className="reg-processing-text">
+          <strong>Đang gửi lên hệ thống...</strong>
+          <span>{acceptedCount} / {targetCount} ảnh đã sẵn sàng để đăng ký.</span>
+        </div>
+      </div>
+    );
   }
 
-  if (saveState === "success") {
-    return {
-      eyebrow: "Hoàn tất đăng ký",
-      title: "Đã lưu dữ liệu khuôn mặt",
-      description: "Bạn có thể quay lại hồ sơ nhân viên bất cứ lúc nào.",
-    };
+  if (sessionStatus === "collecting") {
+    return (
+      <div className="reg-recording-panel">
+        <div className="reg-countdown">
+          <span className="reg-countdown-number">{acceptedCount}</span>
+          <span className="reg-countdown-label">Đang thu thập / {targetCount} ảnh</span>
+        </div>
+        <div className="reg-progress-bar">
+          <div
+            className="reg-progress-fill"
+            style={{ width: `${Math.min(100, Math.round((acceptedCount / Math.max(targetCount, 1)) * 100))}%` }}
+          />
+        </div>
+        <div className="reg-recording-actions">
+          <p className="reg-recording-hint">
+            Xoay đầu chậm và đều để AI nhận thêm nhiều góc nhìn rõ nét.
+          </p>
+          <button type="button" className="btn btn-ghost btn-sm reg-inline-reset" onClick={onReset}>
+            Hủy / Làm lại
+          </button>
+        </div>
+      </div>
+    );
   }
 
-  if (!systemState.cameraActive) {
-    return {
-      eyebrow: "Hệ thống đang chuẩn bị",
-      title: "Đang khởi tạo camera",
-      description: "Vui lòng giữ khuôn mặt trong vùng quét. Quá trình này chỉ mất vài giây.",
-    };
+  if (sessionStatus === "error") {
+    return (
+      <div className="reg-error-panel">
+        <span>{errorMessage || "Không thể hoàn tất đăng ký trong lượt vừa rồi."}</span>
+        <button type="button" className="reg-btn reg-btn--retry" onClick={onReset}>
+          Làm lại
+        </button>
+      </div>
+    );
   }
 
-  if (status === "capturing") {
-    return {
-      eyebrow: "Đang ghi nhận góc mặt",
-      title: `Đang lấy ảnh ${activeStep.title.toLowerCase()}`,
-      description: "Giữ nguyên tư thế thêm một chút để hệ thống chọn ảnh rõ nhất.",
-    };
-  }
-
-  if (completedCount === 0) {
-    return {
-      eyebrow: "Sẵn sàng quét",
-      title: "Đang căn chỉnh khuôn mặt",
-      description: "Giữ khuôn mặt trong vùng oval và nhìn theo hướng dẫn trên màn hình.",
-    };
-  }
-
-  return {
-    eyebrow: "Đang quét sinh trắc học",
-    title: guidance,
-    description: "Hệ thống sẽ tự động ghi lại ảnh tốt nhất cho từng góc khuôn mặt.",
-  };
-}
-
-function getPreparationSteps(registration) {
-  const { systemState, faceAnalysis, status, completedCount, saveState, isSaving } = registration;
-
-  const stepOneState = systemState.cameraActive ? "done" : status === "camera-error" ? "error" : "active";
-  const stepTwoState = faceAnalysis ? "done" : systemState.cameraActive ? "active" : "pending";
-  const stepThreeState =
-    completedCount > 0 || isSaving || saveState === "success"
-      ? "done"
-      : faceAnalysis
-        ? "active"
-        : "pending";
-
-  return [
-    { label: "Kết nối camera", state: stepOneState },
-    { label: "Hiệu chỉnh khuôn mặt", state: stepTwoState },
-    { label: "Sẵn sàng quét", state: stepThreeState },
-  ];
+  return (
+    <button
+      type="button"
+      className="reg-record-btn"
+      onClick={onStart}
+      disabled={!canStart}
+    >
+      <span className="reg-record-icon" />
+      {`Bắt đầu thu thập (${targetCount} ảnh)`}
+    </button>
+  );
 }
 
 export default function EmployeeFaceScannerPage() {
   const { employeeId } = useParams();
   const navigate = useNavigate();
   const { setUnauthenticated } = useManagerAuth();
-  const registration = useFaceRegistration(employeeId, {
+
+  const {
+    videoRef,
+    cameraState,
+    cameraError,
+    modelState,
+    sessionStatus,
+    acceptedCount,
+    targetCount,
+    thumbnailFrames,
+    thumbnailLimit,
+    liveFeedback,
+    elapsedMs,
+    softWarningVisible,
+    saveMessage,
+    saveState,
+    canStart,
+    canReset,
+    employee,
+    startRecording,
+    resetRegistration,
+  } = useFaceRegistration(employeeId, {
     onUnauthenticated: () => {
       setUnauthenticated();
       navigate("/manager/login", { replace: true });
     },
   });
 
-  const statusItems = getStatusItems(registration.systemState, registration.faceAnalysis);
-  const scannerCopy = getScannerCopy(registration);
-  const preparationSteps = getPreparationSteps(registration);
-  const canRetrySave = registration.saveState === "error" && !registration.isSaving;
-  const showUtilityDock = registration.systemState.cameraActive && !registration.isSaving && registration.saveState !== "success";
-  const poseClass = `pose-${registration.faceAnalysis?.pose || "front"}`;
+  const previewSlots = Array.from({ length: thumbnailLimit }, (_, index) => thumbnailFrames[index] || null);
+  const isCameraReady = cameraState === "ready";
+  const isModelReady = modelState === "ready";
+  const feedbackToneClass = `tone-${liveFeedback?.tone || "neutral"}`;
 
   return (
     <div className="page-shell simple-face-page">
       <div className="simple-face-layout">
         <aside className="simple-face-sidebar">
           <article className="glass-panel simple-face-card simple-employee-card">
-            <div className="simple-employee-avatar">{registration.employee.full_name?.slice(0, 2)?.toUpperCase() || "NV"}</div>
+            <div className="simple-employee-avatar">
+              {employee.full_name?.slice(0, 2)?.toUpperCase() || "NV"}
+            </div>
             <div className="stack-sm">
-              <span className="section-label">Mã nhân viên: {registration.employee.employee_code || registration.employee.id}</span>
-              <h2>{registration.employee.full_name}</h2>
-              <p className="text-secondary">{registration.employee.department || "Chưa có phòng ban"}</p>
+              <span className="section-label">
+                Mã nhân viên: {employee.employee_code || employee.id}
+              </span>
+              <h2>{employee.full_name}</h2>
+              <p className="text-secondary">
+                {employee.department || "Chưa có phòng ban"}
+              </p>
             </div>
             <div className="simple-employee-meta">
               <div>
                 <span>Trạng thái</span>
-                <strong>{registration.employee.registration_status}</strong>
+                <strong>{employee.registration_status || "Chưa đăng ký"}</strong>
               </div>
               <div>
                 <span>Tiến độ</span>
-                <strong>{registration.completedCount}/5 góc</strong>
+                <strong>{acceptedCount} / {targetCount} ảnh</strong>
               </div>
             </div>
           </article>
 
-          <article className="glass-panel simple-face-card simple-progress-card">
+          <article className="glass-panel simple-face-card simple-instruction-card">
             <div className="stack-sm">
-              <span className="section-label">Tiến trình đăng ký</span>
-              <h3>Các góc đăng ký</h3>
+              <span className="section-label">Hướng dẫn</span>
+              <h3>Đăng ký khuôn mặt</h3>
+            </div>
+            <div className="reg-instruction-body">
+              <p>
+                Nhấn <strong>Bắt đầu thu thập</strong>, giữ khuôn mặt trong vùng oval
+                rồi xoay nhẹ đầu sang trái, phải, lên, xuống. Hệ thống sẽ tự gom
+                đủ ảnh rõ nét thay vì bắt bạn quay theo countdown cố định.
+              </p>
+              <ul className="reg-tips">
+                <li>Mỗi ảnh đạt chuẩn sẽ xuất hiện ngay ở phần xem trước bên dưới.</li>
+                <li>Nếu AI báo ảnh nhòe, hãy chậm lại một nhịp rồi tiếp tục xoay.</li>
+                <li>Giữ một người trong khung hình và tránh ánh sáng quá gắt.</li>
+              </ul>
             </div>
 
-            <div className="simple-step-list">
-              {registration.steps.map((step, index) => (
-                <div key={step.id} className={`simple-step-item is-${step.status}`}>
-                  <div className="simple-step-index">{step.status === "completed" ? "✓" : index + 1}</div>
-                  <div>
-                    <strong>{step.title}</strong>
-                    {step.status === "active" ? <span>Đang thực hiện</span> : null}
-                  </div>
+            <div className="reg-system-status">
+              <div className={`reg-status-pill ${isCameraReady ? "is-ok" : cameraState === "error" ? "is-error" : "is-warn"}`}>
+                <span className="reg-status-dot" />
+                <span>Camera</span>
+                <strong>
+                  {cameraState === "initializing" ? "Khởi tạo..." : isCameraReady ? "Sẵn sàng" : cameraError ? "Lỗi" : "Chờ..."}
+                </strong>
+              </div>
+              <div className={`reg-status-pill ${isModelReady ? "is-ok" : modelState === "error" ? "is-error" : "is-warn"}`}>
+                <span className="reg-status-dot" />
+                <span>AI YOLO</span>
+                <strong>
+                  {modelState === "loading" ? "Đang tải..." : isModelReady ? "Sẵn sàng" : modelState === "error" ? "Lỗi" : "Chờ..."}
+                </strong>
+              </div>
+            </div>
+
+            <div className={`reg-feedback-card ${feedbackToneClass}`}>
+              <div className="reg-feedback-header">
+                <span className="section-label">Feedback trực tiếp</span>
+                {sessionStatus === "collecting" ? (
+                  <strong>{Math.floor(elapsedMs / 1000)}s</strong>
+                ) : null}
+              </div>
+              <h4>{liveFeedback?.label || "Sẵn sàng thu thập"}</h4>
+              <p>{liveFeedback?.message || "Nhấn bắt đầu để gom ảnh khuôn mặt."}</p>
+              {softWarningVisible ? (
+                <div className="reg-soft-warning">
+                  Thu thập đang lâu hơn bình thường. Hãy xoay chậm hơn hoặc chỉnh ánh sáng đều trên mặt.
                 </div>
-              ))}
+              ) : null}
             </div>
           </article>
         </aside>
 
         <section className="simple-face-main">
           <article className="glass-panel simple-scanner-card">
-            <div className={`simple-scanner-stage ${poseClass}${registration.captureFlash ? " is-capturing" : ""}`}>
-              <video ref={registration.videoRef} className="simple-scanner-video" autoPlay muted playsInline />
+            <div className={`simple-scanner-stage ${sessionStatus === "collecting" ? "is-recording" : ""}`}>
+              <video
+                ref={videoRef}
+                className="simple-scanner-video simple-scanner-video--mirrored"
+                autoPlay
+                muted
+                playsInline
+              />
+
+              <div className="reg-guide-oval" />
 
               <div className="simple-scanner-overlay">
                 <div className="simple-scanner-vignette" />
                 <div className="simple-scanner-gridlines" />
                 <div className="simple-scanner-radar" />
 
-                <div className="simple-scanner-center">
-                  <div className="simple-biometric-frame">
-                    <div className="simple-orbit-ring outer" />
-                    <div className="simple-orbit-ring inner" />
-                    <div className="simple-biometric-oval" />
-                    <div className="simple-biometric-oval inner" />
-                    <div className="simple-biometric-arc" />
-                    <div className="simple-biometric-scanline" />
-                    <div className="simple-biometric-glow" />
-                    <span className="simple-biometric-corner corner-top-left" />
-                    <span className="simple-biometric-corner corner-top-right" />
-                    <span className="simple-biometric-corner corner-bottom-left" />
-                    <span className="simple-biometric-corner corner-bottom-right" />
-                  </div>
-                </div>
-
-                <div className="simple-status-stack">
-                  {statusItems.map((item) => (
-                    <div key={item.label} className={`simple-status-pill is-${item.tone}`}>
-                      <span className="simple-status-dot" />
-                      <span className="simple-status-label">{item.label}</span>
-                      <strong>{item.value}</strong>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="simple-scanner-info-card">
-                  <div className="simple-info-status">
-                    <span className="simple-info-spinner" />
-                    <span>{scannerCopy.eyebrow}</span>
-                  </div>
-                  <h3 className="simple-info-title">{scannerCopy.title}</h3>
-                  <p className="simple-info-description">{scannerCopy.description}</p>
-
-                  <div className="simple-info-progress">
-                    {preparationSteps.map((step) => (
-                      <div key={step.label} className={`simple-progress-step is-${step.state}`}>
-                        <span className="simple-progress-dot" />
-                        <span>{step.label}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {canRetrySave ? (
-                    <div className="simple-info-actions">
-                      <button type="button" className="simple-info-btn is-primary" onClick={() => registration.saveIdentity()}>
-                        Lưu lại
-                      </button>
-                      <button type="button" className="simple-info-btn" onClick={registration.resetRegistration}>
-                        Hủy
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-
-                {showUtilityDock ? (
-                  <div className="simple-utility-dock">
-                    <button type="button" className="simple-utility-btn" onClick={registration.resetRegistration} aria-label="Làm lại toàn bộ">
-                      ←
-                    </button>
-                    <button type="button" className="simple-utility-btn" onClick={registration.recaptureCurrent} aria-label="Chụp lại bước hiện tại">
-                      ↻
-                    </button>
+                {sessionStatus === "collecting" ? (
+                  <div className="reg-live-badge">
+                    <span className="reg-live-dot" />
+                    ĐANG THU THẬP
                   </div>
                 ) : null}
+
+                <div className="reg-action-area">
+                  <ActionPanel
+                    sessionStatus={sessionStatus}
+                    acceptedCount={acceptedCount}
+                    targetCount={targetCount}
+                    canStart={canStart}
+                    errorMessage={saveMessage}
+                    onStart={startRecording}
+                    onReset={resetRegistration}
+                  />
+                </div>
               </div>
             </div>
           </article>
@@ -244,33 +240,54 @@ export default function EmployeeFaceScannerPage() {
           <article className="glass-panel simple-gallery-card">
             <div className="row-between">
               <div className="stack-sm">
-                <span className="section-label">Thư viện góc chụp</span>
-                <h3>Ảnh các góc đã hoàn thành</h3>
+                <span className="section-label">Xem trước thu thập</span>
+                <h3>{acceptedCount} / {targetCount} ảnh đã nhận</h3>
+                <p className="text-secondary">
+                  Hiển thị {thumbnailLimit} khung hình hợp lệ gần nhất để bạn biết hệ thống đang bắt ảnh tốt.
+                </p>
               </div>
-              <div className="simple-gallery-progress">
-                <span>{Math.round((registration.completedCount / 5) * 100)}% hoàn tất</span>
-                <div className="progress"><span style={{ width: `${(registration.completedCount / 5) * 100}%` }} /></div>
-              </div>
+              {canReset ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={resetRegistration}
+                >
+                  Hủy / Làm lại
+                </button>
+              ) : null}
             </div>
 
-            <div className="simple-gallery-grid">
-              {registration.steps.map((step) => (
-                <div key={step.id} className={`simple-gallery-item${registration.captures[step.id] ? " is-filled" : ""}${registration.activeStep.id === step.id ? " is-active" : ""}`}>
-                  <div className="simple-gallery-thumb">
-                    {registration.captures[step.id] ? <img src={registration.captures[step.id]} alt={step.title} /> : <span>{registration.activeStep.id === step.id ? "Đang quét..." : "Chưa có"}</span>}
-                  </div>
-                  <strong>{step.title}</strong>
+            <div className="reg-thumb-grid reg-thumb-grid--fixed">
+              {previewSlots.map((frame, index) => (
+                <div
+                  key={index}
+                  className={`reg-thumb-slot ${frame ? "is-filled" : ""}`}
+                >
+                  {frame ? (
+                    <img src={frame.previewUrl} alt={`Frame ${index + 1}`} />
+                  ) : (
+                    <span className="reg-thumb-empty" />
+                  )}
                 </div>
               ))}
             </div>
           </article>
 
-          {registration.saveMessage ? <div className={`alert alert-${registration.saveState === "error" ? "error" : registration.saveState === "success" ? "success" : "info"}`}>{registration.saveMessage}</div> : null}
+          {saveMessage ? (
+            <div className={`alert alert-${saveState === "success" ? "success" : saveState === "error" ? "error" : "info"}`}>
+              {saveMessage}
+            </div>
+          ) : null}
 
           <div className="simple-face-footer row-between">
-            <div className="text-muted">© 2026 Hệ thống định danh. Bảo lưu mọi quyền.</div>
+            <div className="text-muted">
+              © 2026 Hệ thống định danh. Bảo lưu mọi quyền.
+            </div>
             <div className="row">
-              <Link className="btn btn-secondary btn-sm" to={`/manager/employees/${employeeId}/faces`}>
+              <Link
+                className="btn btn-secondary btn-sm"
+                to={`/manager/employees/${employeeId}/faces`}
+              >
                 Quản lý ảnh tĩnh
               </Link>
               <Link className="btn btn-ghost btn-sm" to="/manager/employees">

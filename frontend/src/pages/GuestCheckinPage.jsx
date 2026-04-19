@@ -15,7 +15,7 @@ const MAX_HISTORY_ITEMS = 10;
 const BOX_COLORS = {
   detecting: '#00e5ff',    // Cyan
   recognizing: '#ffa726',  // Amber
-  recognized: '#66bb6a',   // Green
+  recognized: '#00FF00',   // Green (rực, chuẩn AI hiện đại)
   unknown: '#ef5350',      // Red
 };
 
@@ -121,39 +121,60 @@ export default function GuestCheckinPage() {
 
     const vw = video.videoWidth || 640;
     const vh = video.videoHeight || 480;
-    canvas.width = vw;
-    canvas.height = vh;
+    const rw = video.offsetWidth  || vw;   // rendered width  (CSS size)
+    const rh = video.offsetHeight || vh;   // rendered height (CSS size)
+
+    // Canvas phải match kích thước RENDERED của video để tọa độ đúng
+    canvas.width = rw;
+    canvas.height = rh;
+    const scaleX = rw / vw;
+    const scaleY = rh / vh;
     const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, vw, vh);
+    ctx.clearRect(0, 0, rw, rh);
 
     if (modelState !== 'ready') return;
 
     const tracks = getTracksSnapshot();
     for (const track of tracks) {
       const { box, state, result: trackResult } = track;
+      if (!box) continue;
+
       const color = BOX_COLORS[state] || BOX_COLORS.detecting;
 
-      // Vẽ box
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1);
+      // ── 1. Bounding Box — viền dày 4px, tọa độ đã scale ──
+      // Lật tọa độ X của bounding box để khớp với CSS scaleX(-1) của video
+      // thay vì lật cả canvas bằng CSS.
+      const w  = (box.x2 - box.x1) * scaleX;
+      const h  = (box.y2 - box.y1) * scaleY;
+      const x1 = rw - (box.x2 * scaleX);
+      const y1 = box.y1 * scaleY;
 
-      // Nhãn tên
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 4;
+      ctx.strokeRect(x1, y1, w, h);
+
+      // ── 2. Nhãn tên ở CẠNH DƯỚI ──
       const label = state === 'recognized' && trackResult?.full_name
         ? trackResult.full_name
         : state === 'recognizing'
           ? 'Đang xác nhận...'
           : state === 'unknown'
-            ? 'Không xác định'
+            ? 'Unknown'
             : '';
 
       if (label) {
-        ctx.font = '14px system-ui, sans-serif';
+        ctx.font = 'bold 16px system-ui, sans-serif';
         const tw = ctx.measureText(label).width;
+        const padX = 10;
+        const labelH = 28;
+        const lx = x1;
+        const ly = y1 + h; // chồng đè lên đáy box
+
+        // Vẽ nhãn bình thường vì canvas không còn bị lật ngược
         ctx.fillStyle = color;
-        ctx.fillRect(box.x1, box.y1 - 22, tw + 10, 22);
-        ctx.fillStyle = '#fff';
-        ctx.fillText(label, box.x1 + 5, box.y1 - 6);
+        ctx.fillRect(lx, ly, tw + padX * 2, labelH);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(label, lx + padX, ly + 20);
       }
     }
   }, [modelState, getTracksSnapshot, videoRef]);
@@ -234,10 +255,10 @@ export default function GuestCheckinPage() {
 
   function applyResult(payload) {
     setResult(payload);
-    pushHistory(payload);
 
-    // Pause briefly after a successful match to avoid duplicate scans from the same person.
+    // Chỉ push vào lịch sử khi nhận diện THÀNH CÔNG
     if (payload?.status === "recognized" || payload?.status === "already_checked_in") {
+      pushHistory(payload);
       setScanMode("paused");
       setCooldownSeconds(SUCCESS_COOLDOWN_SECONDS);
     }
@@ -328,7 +349,7 @@ export default function GuestCheckinPage() {
       <section className="kiosk-grid">
         <div className="kiosk-camera-panel panel-dark">
           <div className="kiosk-camera-stage">
-            <video ref={videoRef} className="kiosk-video" autoPlay playsInline muted />
+            <video ref={videoRef} className="kiosk-video kiosk-video--mirrored" autoPlay playsInline muted />
             <canvas
               ref={overlayCanvasRef}
               className="kiosk-detection-canvas"
@@ -357,13 +378,6 @@ export default function GuestCheckinPage() {
               </div>
             ) : null}
             <div className={`kiosk-overlay ${cameraReady ? "" : "is-error"} ${isPaused ? "is-paused" : ""}`}>
-              <div className="face-box">
-                <span />
-                <span />
-                <span />
-                <span />
-              </div>
-              {cameraReady && !isPaused ? <div className="laser-line" /> : null}
               <div className="overlay-status">
                 <span className={`scan-dot ${cameraReady && !isPaused ? "active" : ""}`} />
                 {getStatusLabel(cameraState, scanMode)}

@@ -91,6 +91,12 @@ def test_face_samples_list_returns_employee_and_samples(app, client):
     assert payload["employee"]["full_name"] == "Ada Lovelace"
     assert payload["employee"]["is_active"] is True
     assert "created_at" in payload["employee"]
+    assert payload["capture_config"] == {
+        "min_frames": app.config["FACE_BATCH_MIN_FRAMES"],
+        "max_frames": app.config["FACE_BATCH_MAX_FRAMES"],
+        "thumbnail_limit": 10,
+        "min_capture_gap_ms": 700,
+    }
     assert payload["face_samples"] == [
         {
             "id": sample_id,

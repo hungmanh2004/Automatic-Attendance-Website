@@ -5,6 +5,7 @@ const FRIENDLY_ERROR_MESSAGES = {
   employee_not_found: 'Không tìm thấy nhân viên được yêu cầu.',
   face_registration_exists: 'Nhân viên này đã có đăng ký khuôn mặt. Hãy xóa trước khi đăng ký lại.',
   face_sample_not_found: 'Không tìm thấy ảnh khuôn mặt được yêu cầu.',
+  insufficient_valid_frames: 'Khung hình hợp lệ chưa đủ để hoàn tất đăng ký. Hãy thu thập lại chậm hơn và giữ mặt rõ nét.',
   invalid_credentials: 'Tên đăng nhập hoặc mật khẩu không đúng.',
   invalid_request: 'Yêu cầu gửi lên không hợp lệ. Hãy thử lại.',
   multiple_faces: 'Trong khung hình có nhiều hơn một khuôn mặt. Hãy để chỉ một người vào khung.',

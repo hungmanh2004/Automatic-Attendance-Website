@@ -147,34 +147,32 @@ export function enrollEmployeeFaces(employeeId, formDataOrFiles) {
 export const enrollFaceSamples = enrollEmployeeFaces
 
 /**
- * Batch face enrollment: captures multiple frames and sends them with
- * metadata to the backend's batch enrollment endpoint.
+ * Batch face enrollment: sends a single multipart request containing the
+ * accepted frame crops plus lightweight capture metadata.
  *
- * @param {number} employeeId
- * @param {object} payloadByPose  - { front: dataUrl, left: dataUrl, ... } (legacy/fallback data)
- * @param {Array}  batchFrames    - [{ image: dataUrl, pose: string, timestamp: number }]
- * @returns {Promise<object>} Backend response
+ * Supported frame shape:
+ *   { blob, capturedAtMs, detectorScore, blurScore, hintPose }
+ *
+ * Legacy callers may still pass `(employeeId, payloadByPose, batchFrames)`.
  */
-export function enrollEmployeeFacesBatch(employeeId, payloadByPose, batchFrames = []) {
+export function enrollEmployeeFacesBatch(employeeId, payloadOrFrames = [], legacyBatchFrames = []) {
+  const normalizedFrames = _normalizeBatchFrames(payloadOrFrames, legacyBatchFrames)
   const formData = new FormData()
-  let appendedCount = 0
 
-  batchFrames.forEach((frame, index) => {
-    if (!frame?.image) return
-    formData.append('frames', _dataUrlToBlob(frame.image), `frame-${index + 1}.jpg`)
-    appendedCount += 1
+  normalizedFrames.forEach((frame, index) => {
+    if (!(frame?.blob instanceof Blob)) return
+    const extension = _mimeTypeToExtension(frame.blob.type)
+    formData.append('frames', frame.blob, `frame-${index + 1}.${extension}`)
   })
 
-  appendedCount = _appendFallbackFrames(formData, payloadByPose, appendedCount)
-
-  if (appendedCount < 20) {
+  if (normalizedFrames.length < 20) {
     throw new ApiError('Chưa thu đủ khung hình để gửi lên máy chủ.', {
-      payload: { frame_count: appendedCount, status: 'insufficient_frames' },
+      payload: { frame_count: normalizedFrames.length, status: 'insufficient_frames' },
       status: 400,
     })
   }
 
-  formData.append('metadata', JSON.stringify(_buildBatchMetadata(batchFrames, payloadByPose)))
+  formData.append('metadata', JSON.stringify(_buildBatchMetadata(normalizedFrames)))
 
   return apiRequest(`/api/manager/employees/${employeeId}/face-enrollment/batch`, {
     body: formData,
@@ -204,36 +202,68 @@ const FACE_FIELD_MAP = {
   down: 'down_image',
 }
 
-function _appendFallbackFrames(formData, payloadByPose, existingCount) {
-  const fallbackImages = Object.entries(FACE_FIELD_MAP)
-    .map(([pose]) => ({ pose, image: payloadByPose?.[pose] }))
-    .filter((item) => item.image)
-
-  let count = existingCount
-  let index = 0
-
-  while (count < 20 && fallbackImages.length > 0) {
-    const item = fallbackImages[index % fallbackImages.length]
-    formData.append('frames', _dataUrlToBlob(item.image), `fallback-${count + 1}.jpg`)
-    count += 1
-    index += 1
+function _normalizeBatchFrames(payloadOrFrames, legacyBatchFrames) {
+  if (Array.isArray(payloadOrFrames)) {
+    return payloadOrFrames.filter(_isAcceptedFrame)
   }
 
-  return count
+  if (Array.isArray(legacyBatchFrames) && legacyBatchFrames.length > 0) {
+    return legacyBatchFrames
+      .map((frame, index) => {
+        const dataUrl = frame?.image
+        if (!dataUrl) return null
+        return {
+          blob: _dataUrlToBlob(dataUrl),
+          capturedAtMs: frame.timestamp ?? index * 180,
+          detectorScore: frame.detectorScore ?? null,
+          blurScore: frame.blurScore ?? null,
+          hintPose: frame.pose || 'front',
+        }
+      })
+      .filter(Boolean)
+  }
+
+  const payloadByPose = payloadOrFrames
+  return Object.entries(FACE_FIELD_MAP)
+    .map(([pose]) => payloadByPose?.[pose] ? {
+      blob: _dataUrlToBlob(payloadByPose[pose]),
+      capturedAtMs: 0,
+      detectorScore: null,
+      blurScore: null,
+      hintPose: pose === 'straight' ? 'front' : pose,
+    } : null)
+    .filter(Boolean)
 }
 
-function _buildBatchMetadata(batchFrames, payloadByPose) {
-  const source = batchFrames.length ? 'scanner_capture' : 'guided_manual'
-  const frames = batchFrames.length
-    ? batchFrames.map((frame, i) => ({ index: i, hint_pose: frame.pose || 'front', timestamp_ms: frame.timestamp || i * 180 }))
-    : Object.entries(FACE_FIELD_MAP)
-        .map(([pose]) => ({ image: payloadByPose?.[pose], pose }))
-        .filter((item) => item.image)
-        .flatMap((item) =>
-          Array.from({ length: 4 }, (_, i) => ({ ...item, timestamp: i * 180 })),
-        )
+function _isAcceptedFrame(frame) {
+  return frame?.blob instanceof Blob
+}
 
-  return { source, capture_mode: 'guided', frames }
+function _buildBatchMetadata(frames) {
+  return {
+    source: 'scanner_capture',
+    capture_mode: 'goal_based',
+    frames: frames.map((frame, index) => ({
+      index,
+      hint_pose: frame.hintPose || 'front',
+      timestamp_ms: Number.isFinite(frame.capturedAtMs) ? frame.capturedAtMs : index * 180,
+      detector_score: typeof frame.detectorScore === 'number' ? frame.detectorScore : null,
+      blur_score: typeof frame.blurScore === 'number' ? frame.blurScore : null,
+    })),
+  }
+}
+
+function _mimeTypeToExtension(mimeType) {
+  switch (mimeType) {
+    case 'image/png':
+      return 'png'
+    case 'image/webp':
+      return 'webp'
+    case 'image/bmp':
+      return 'bmp'
+    default:
+      return 'jpg'
+  }
 }
 
 // ─── Face sample management ──────────────────────────────────────────────────
