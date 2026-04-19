@@ -49,24 +49,42 @@ class RecognitionService:
 
         Backend chỉ cần align + embed + KNN + ghi điểm danh.
         """
+        import time
+        t0 = time.perf_counter()
         embedding = self.embedding_service.extract_embeddings_from_crop(
             crop_bytes, keypoints_list
+        )
+        t1 = time.perf_counter()
+        import logging
+        logging.getLogger(__name__).info(
+            "[TIMING] extract_embeddings: %.1fms", (t1 - t0) * 1000
         )
 
         if embedding is None:
             return {"status": "no_face"}
 
+        t2 = time.perf_counter()
         match = self.face_index_service.find_match(embedding)
+        t3 = time.perf_counter()
+        logging.getLogger(__name__).info(
+            "[TIMING] find_match (Redis KNN): %.1fms", (t3 - t2) * 1000
+        )
         if match is None:
             return {"status": "unknown"}
 
         snapshot_path = self.storage_service.save_guest_frame(
             crop_bytes, filename=filename
         )
+        t4 = time.perf_counter()
         event, created = self.attendance_service.record_checkin(
             employee_id=match["employee_id"],
             snapshot_path=snapshot_path,
             distance=match["distance"],
+        )
+        t5 = time.perf_counter()
+        logging.getLogger(__name__).info(
+            "[TIMING] DB write (attendance): %.1fms | GRAND TOTAL: %.1fms",
+            (t5 - t4) * 1000, (t5 - t0) * 1000
         )
         if not created:
             _cleanup_orphan_snapshot(snapshot_path, event.snapshot_path)
