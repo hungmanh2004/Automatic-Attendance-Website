@@ -1,26 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, enrollEmployeeFacesBatch, getFaceSamples } from "../lib/api";
+import { getFriendlyBackendErrorMessage } from "../lib/errorMessages";
 import {
-  analyzeDetectedFace,
-  captureFrame,
-  createFaceDetector,
-  detectFaces,
-  isPoseMatching,
-  startCamera,
-  stopCamera,
-} from "../lib/cameraService";
-
-export const FACE_REGISTRATION_STEPS = [
-  { id: "straight", title: "Nhìn thẳng", description: "Giữ khuôn mặt ở giữa khung và nhìn trực diện vào camera." },
-  { id: "left", title: "Quay trái", description: "Xoay nhẹ mặt sang trái để lấy biên dạng bên trái." },
-  { id: "right", title: "Quay phải", description: "Xoay nhẹ mặt sang phải để hoàn tất cặp góc ngang." },
-  { id: "up", title: "Nhìn lên", description: "Ngẩng cằm nhẹ và giữ ổn định trong khung quét." },
-  { id: "down", title: "Nhìn xuống", description: "Cúi nhẹ đầu xuống để hoàn tất quá trình đăng ký." },
-];
-
-const MIN_BATCH_FRAME_COUNT = 20;
-const MAX_BATCH_FRAME_COUNT = 30;
+  buildCaptureFeedback,
+  CAPTURE_LOOP_INTERVAL_MS,
+  CAPTURE_SOFT_WARNING_MS,
+  computeBlurScore,
+  DEFAULT_CAPTURE_CONFIG,
+  evaluateFrameQuality,
+  mirrorHintPose,
+  normalizeCaptureConfig,
+  shouldExtendCaptureAfterBatchError,
+} from "../lib/faceRegistrationCapture";
+import { cropFace, detectFaces, isModelLoaded, loadModel } from "../lib/yoloOnnxService";
 
 const MOCK_EMPLOYEE = {
   department: "Phòng Kế toán",
@@ -30,382 +23,409 @@ const MOCK_EMPLOYEE = {
   is_active: true,
 };
 
-function getInitialCaptures() {
-  return FACE_REGISTRATION_STEPS.reduce((result, step) => {
-    result[step.id] = null;
-    return result;
-  }, {});
-}
-
-function getStepStatus(stepIndex, activeIndex, captures) {
-  const step = FACE_REGISTRATION_STEPS[stepIndex];
-  if (captures[step.id]) return "completed";
-  if (stepIndex === activeIndex) return "active";
-  if (stepIndex < activeIndex) return "completed";
-  return "pending";
-}
-
-function scoreCandidateFrame(analysis, stepId) {
-  if (!analysis) return 0;
-
-  const poseBonus = isPoseMatching(stepId, analysis.pose) ? 1 : 0;
-  const centeredBonus = analysis.isCentered ? 1 : 0;
-  const insideBonus = analysis.isInsideGuide ? 1 : 0;
-  const distanceScore = Math.min(Math.max(analysis.widthRatio || 0, 0.18), 0.42);
-  const confidenceScore = Math.max(analysis.confidence || 0, 0.4);
-  const stabilityPenalty = Math.abs(analysis.yaw || 0) + Math.abs(analysis.pitch || 0);
-
-  return poseBonus * 3 + centeredBonus * 2 + insideBonus * 1.5 + distanceScore * 4 + confidenceScore * 2 - stabilityPenalty;
-}
-
 export function useFaceRegistration(employeeId, { onUnauthenticated } = {}) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const detectorRef = useRef(null);
-  const analysisIntervalRef = useRef(null);
-  const holdStartRef = useRef(null);
-  const captureLockRef = useRef(false);
-  const bestFrameRef = useRef(null);
-  const autoSubmitTriggeredRef = useRef(false);
-  const batchFramesRef = useRef([]);
-  const batchFrameLastAddedAtRef = useRef(0);
+  const workCanvasRef = useRef(null);
+  const captureTimeoutRef = useRef(null);
+  const sessionTokenRef = useRef(0);
+  const sessionStartAtRef = useRef(0);
+  const lastAcceptedAtRef = useRef(Number.NaN);
+  const acceptedFramesRef = useRef([]);
+  const captureConfigRef = useRef(normalizeCaptureConfig(DEFAULT_CAPTURE_CONFIG));
+  const sessionStatusRef = useRef("idle");
+  const mountedRef = useRef(false);
+  const runCaptureLoopRef = useRef(null);
+  const onAuthRef = useRef(onUnauthenticated);
+  onAuthRef.current = onUnauthenticated;
 
   const [employee, setEmployee] = useState(MOCK_EMPLOYEE);
-  const [status, setStatus] = useState("initializing");
-  const [guidance, setGuidance] = useState("Đang khởi tạo camera");
-  const [warning, setWarning] = useState("");
-  const [captures, setCaptures] = useState(getInitialCaptures);
-  const [activeStepIndex, setActiveStepIndex] = useState(0);
-  const [captureFlash, setCaptureFlash] = useState(false);
-  const [faceAnalysis, setFaceAnalysis] = useState(null);
-  const [isSaving, setIsSaving] = useState(false);
+  const [captureConfig, setCaptureConfig] = useState(captureConfigRef.current);
+  const [sessionStatus, setSessionStatus] = useState("idle");
+  const [targetCount, setTargetCount] = useState(captureConfigRef.current.minFrames);
+  const [acceptedFrames, setAcceptedFrames] = useState([]);
+  const [thumbnailFrames, setThumbnailFrames] = useState([]);
+  const [liveFeedback, setLiveFeedback] = useState(
+    buildCaptureFeedback("idle", { targetCount: captureConfigRef.current.minFrames }),
+  );
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [softWarningVisible, setSoftWarningVisible] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [saveState, setSaveState] = useState("idle");
-  const [batchFrameCount, setBatchFrameCount] = useState(0);
-  const [systemState, setSystemState] = useState({
-    cameraActive: false,
-    detectorReady: false,
-    mode: "FaceDetector gốc của trình duyệt",
-  });
+  const [cameraState, setCameraState] = useState("initializing");
+  const [cameraError, setCameraError] = useState("");
+  const [modelState, setModelState] = useState("idle");
 
-  const activeStep = FACE_REGISTRATION_STEPS[activeStepIndex] || FACE_REGISTRATION_STEPS.at(-1);
-  const completedCount = FACE_REGISTRATION_STEPS.filter((step) => captures[step.id]).length;
-  const canSave = completedCount === FACE_REGISTRATION_STEPS.length && !isSaving;
+  const updateSessionStatus = useCallback((nextStatus) => {
+    sessionStatusRef.current = nextStatus;
+    setSessionStatus(nextStatus);
+  }, []);
 
-  function resetHoldTracking() {
-    holdStartRef.current = null;
-    bestFrameRef.current = null;
-  }
-
-  function resetBatchFrames() {
-    batchFramesRef.current = [];
-    batchFrameLastAddedAtRef.current = 0;
-    setBatchFrameCount(0);
-  }
-
-  function collectBatchFrame(frame, pose) {
-    if (!frame || batchFramesRef.current.length >= MAX_BATCH_FRAME_COUNT) return;
-
-    const now = Date.now();
-    if (now - batchFrameLastAddedAtRef.current < 140) return;
-
-    batchFramesRef.current = [...batchFramesRef.current, { image: frame, pose, timestamp: now }];
-    batchFrameLastAddedAtRef.current = now;
-    setBatchFrameCount(batchFramesRef.current.length);
-  }
-
-  async function saveIdentity(force = false) {
-    if ((!canSave && !force) || isSaving) return;
-
-    setIsSaving(true);
-    setSaveMessage("");
-    setSaveState("uploading");
-    setStatus("uploading");
-    setGuidance("Đang gửi dữ liệu khuôn mặt");
-
-    try {
-      await enrollEmployeeFacesBatch(employeeId, captures, batchFramesRef.current);
-      setSaveState("success");
-      setSaveMessage(`Đã tự động lưu bộ khuôn mặt nhân viên từ ${batchFramesRef.current.length} khung hình.`);
-      setStatus("upload-success");
-      setGuidance("Đã đồng bộ khuôn mặt thành công");
-      setEmployee((current) => ({ ...current, registration_status: "Đã đăng ký" }));
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        onUnauthenticated?.();
-        return;
+  const revokePreviewUrls = useCallback((frames) => {
+    frames.forEach((frame) => {
+      if (frame?.previewUrl) {
+        URL.revokeObjectURL(frame.previewUrl);
       }
+    });
+  }, []);
 
-      autoSubmitTriggeredRef.current = false;
-      setSaveState("error");
-      setSaveMessage(error.message || "Không thể lưu dữ liệu khuôn mặt.");
-      setStatus("upload-error");
-      setGuidance("Tự động lưu thất bại, vui lòng thử lại");
-    } finally {
-      setIsSaving(false);
+  const clearCaptureLoop = useCallback(() => {
+    sessionTokenRef.current += 1;
+    if (captureTimeoutRef.current) {
+      clearTimeout(captureTimeoutRef.current);
+      captureTimeoutRef.current = null;
     }
-  }
+  }, []);
+
+  const resetCaptureState = useCallback(({ keepMessage = false } = {}) => {
+    clearCaptureLoop();
+    revokePreviewUrls(acceptedFramesRef.current);
+    acceptedFramesRef.current = [];
+    lastAcceptedAtRef.current = Number.NaN;
+    sessionStartAtRef.current = 0;
+    setAcceptedFrames([]);
+    setThumbnailFrames([]);
+    setElapsedMs(0);
+    setSoftWarningVisible(false);
+    setTargetCount(captureConfigRef.current.minFrames);
+    setSaveState("idle");
+    if (!keepMessage) {
+      setSaveMessage("");
+    }
+  }, [clearCaptureLoop, revokePreviewUrls]);
 
   useEffect(() => {
-    let mounted = true;
+    mountedRef.current = true;
 
     async function bootstrap() {
       try {
         const payload = await getFaceSamples(employeeId);
-        if (!mounted) return;
+        if (!mountedRef.current) return;
         setEmployee(payload?.employee || MOCK_EMPLOYEE);
+        const nextConfig = normalizeCaptureConfig(payload?.capture_config);
+        captureConfigRef.current = nextConfig;
+        setCaptureConfig(nextConfig);
+        setTargetCount(nextConfig.minFrames);
+        setLiveFeedback(buildCaptureFeedback("idle", { targetCount: nextConfig.minFrames }));
       } catch (error) {
-        if (!mounted) return;
+        if (!mountedRef.current) return;
         if (error?.status === 401) {
-          onUnauthenticated?.();
+          onAuthRef.current?.();
           return;
         }
+        setEmployee((currentEmployee) => ({ ...currentEmployee, id: employeeId || currentEmployee.id }));
+      }
 
-        setEmployee((current) => ({
-          ...current,
-          id: employeeId || current.id,
-        }));
+      if (!videoRef.current) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        if (!mountedRef.current || !videoRef.current) return;
       }
 
       try {
-        detectorRef.current = await createFaceDetector();
-        if (!mounted) return;
-
-        setSystemState((current) => ({
-          ...current,
-          detectorReady: Boolean(detectorRef.current),
-          mode: detectorRef.current ? "FaceDetector gốc của trình duyệt" : "Chế độ camera hướng dẫn",
-        }));
-
-        const stream = await startCamera(videoRef.current);
-        if (!mounted) {
-          stopCamera(stream);
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        });
+        if (!mountedRef.current) {
+          stream.getTracks().forEach((track) => track.stop());
           return;
         }
-
+        videoRef.current.srcObject = stream;
         streamRef.current = stream;
-        setStatus("camera-ready");
-        setGuidance("Nhìn thẳng");
-        setSystemState((current) => ({
-          ...current,
-          cameraActive: true,
-        }));
+        setCameraState("ready");
       } catch (error) {
-        if (!mounted) return;
-        setStatus("camera-error");
-        setWarning(error.message || "Không thể mở camera.");
-        setGuidance("Camera chưa sẵn sàng");
+        if (!mountedRef.current) return;
+        setCameraState("error");
+        setCameraError(error?.message || "Không thể mở camera.");
+        return;
+      }
+
+      if (!workCanvasRef.current) {
+        workCanvasRef.current = document.createElement("canvas");
+      }
+
+      if (isModelLoaded()) {
+        if (mountedRef.current) setModelState("ready");
+        return;
+      }
+
+      if (mountedRef.current) setModelState("loading");
+      try {
+        await loadModel(() => {});
+        if (mountedRef.current) setModelState("ready");
+      } catch (error) {
+        console.error("[FaceRegistration] YOLO load failed:", error);
+        if (mountedRef.current) setModelState("error");
       }
     }
 
     void bootstrap();
 
     return () => {
-      mounted = false;
-      if (analysisIntervalRef.current) {
-        window.clearInterval(analysisIntervalRef.current);
-      }
-      stopCamera(streamRef.current);
+      mountedRef.current = false;
+      clearCaptureLoop();
+      revokePreviewUrls(acceptedFramesRef.current);
+      streamRef.current?.getTracks().forEach((track) => track.stop());
     };
-  }, [employeeId, onUnauthenticated]);
+  }, [clearCaptureLoop, employeeId, revokePreviewUrls]);
 
   useEffect(() => {
-    if (!["camera-ready", "scanning", "capturing", "complete", "upload-error"].includes(status)) {
+    if (sessionStatus !== "collecting") {
+      setElapsedMs(0);
+      setSoftWarningVisible(false);
       return undefined;
     }
 
-    const tick = async () => {
-      const videoElement = videoRef.current;
-      if (!videoElement?.videoWidth || captureLockRef.current) {
+    const intervalHandle = setInterval(() => {
+      const nextElapsed = Math.max(0, Date.now() - sessionStartAtRef.current);
+      setElapsedMs(nextElapsed);
+      setSoftWarningVisible(nextElapsed >= CAPTURE_SOFT_WARNING_MS);
+    }, 250);
+
+    return () => clearInterval(intervalHandle);
+  }, [sessionStatus]);
+
+  const submitBatch = useCallback(async () => {
+    const activeTargetCount = targetCount;
+    updateSessionStatus("uploading");
+    setSaveState("idle");
+    setSaveMessage("");
+    setLiveFeedback(buildCaptureFeedback("uploading", { acceptedCount: acceptedFramesRef.current.length, targetCount: activeTargetCount }));
+
+    try {
+      await enrollEmployeeFacesBatch(employeeId, acceptedFramesRef.current);
+      if (!mountedRef.current) return;
+      updateSessionStatus("success");
+      setSaveState("success");
+      setSaveMessage(`Hoàn tất đăng ký thành công ${acceptedFramesRef.current.length} mẫu ảnh!`);
+      setLiveFeedback(buildCaptureFeedback("success", { acceptedCount: acceptedFramesRef.current.length, targetCount: activeTargetCount }));
+      setEmployee((currentEmployee) => ({ ...currentEmployee, registration_status: "Đã đăng ký" }));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onAuthRef.current?.();
         return;
       }
+      if (!mountedRef.current) return;
 
-      const faces = await detectFaces(detectorRef.current, videoElement);
-
-      if (!faces.length) {
-        resetHoldTracking();
-        setStatus("scanning");
-        setWarning(detectorRef.current ? "Không phát hiện khuôn mặt trong khung." : "Đang chờ camera ổn định để bắt đầu quét.");
-        setGuidance("Đưa khuôn mặt vào giữa khung");
-        setFaceAnalysis(null);
-        return;
-      }
-
-      if (faces.length > 1) {
-        resetHoldTracking();
-        setStatus("scanning");
-        setWarning("Chỉ cho phép một khuôn mặt trong khung.");
-        setGuidance("Chỉ để một người trong vùng quét");
-        setFaceAnalysis(null);
-        return;
-      }
-
-      const analysis = analyzeDetectedFace(faces[0], videoElement.videoWidth, videoElement.videoHeight);
-
-      setFaceAnalysis(analysis);
-      setStatus("scanning");
-      setWarning("");
-
-      if (!analysis.isCentered || !analysis.isInsideGuide) {
-        resetHoldTracking();
-        setGuidance("Đưa khuôn mặt vào giữa khung");
-        setWarning("Khuôn mặt đang lệch khỏi vùng quét.");
-        return;
-      }
-
-      if (analysis.isTooFar) {
-        resetHoldTracking();
-        setGuidance("Tiến gần camera hơn");
-        setWarning("Tiến gần hơn để hệ thống lấy đủ chi tiết khuôn mặt.");
-        return;
-      }
-
-      const frame = captureFrame(videoElement);
-      collectBatchFrame(frame, analysis.pose);
-
-      if (completedCount === FACE_REGISTRATION_STEPS.length) {
-        setGuidance(
-          batchFramesRef.current.length >= MIN_BATCH_FRAME_COUNT
-            ? "Đã thu đủ dữ liệu, đang tự động lưu"
-            : "Giữ khuôn mặt thêm vài giây để hoàn tất dữ liệu video",
-        );
-        return;
-      }
-
-      if (!isPoseMatching(activeStep.id, analysis.pose)) {
-        resetHoldTracking();
-        setGuidance(activeStep.title);
-        setWarning("Góc mặt hiện tại chưa đúng với bước đang thực hiện.");
-        return;
-      }
-
-      const score = scoreCandidateFrame(analysis, activeStep.id);
-      if (frame && (!bestFrameRef.current || score > bestFrameRef.current.score)) {
-        bestFrameRef.current = { frame, score };
-      }
-
-      setGuidance(`Giữ yên: ${activeStep.title}`);
-      if (!holdStartRef.current) {
-        holdStartRef.current = Date.now();
-        return;
-      }
-
-      if (Date.now() - holdStartRef.current < 950) {
-        return;
-      }
-
-      captureLockRef.current = true;
-      setStatus("capturing");
-      const bestFrame = bestFrameRef.current?.frame || frame;
-
-      if (bestFrame) {
-        setCaptureFlash(true);
-        window.setTimeout(() => setCaptureFlash(false), 280);
-        setCaptures((current) => ({
-          ...current,
-          [activeStep.id]: bestFrame,
+      if (shouldExtendCaptureAfterBatchError(error, {
+        acceptedCount: acceptedFramesRef.current.length,
+        currentTargetCount: activeTargetCount,
+        maxFrames: captureConfigRef.current.maxFrames,
+      })) {
+        const extendedTargetCount = captureConfigRef.current.maxFrames;
+        const nextToken = sessionTokenRef.current + 1;
+        sessionTokenRef.current = nextToken;
+        setTargetCount(extendedTargetCount);
+        updateSessionStatus("collecting");
+        setSaveState("idle");
+        setSaveMessage("Máy chủ cần thêm vài khung hình khác nhau. Hãy xoay tiếp để hệ thống gom thêm ảnh và gửi lại.");
+        setLiveFeedback(buildCaptureFeedback("needs_more_frames", {
+          acceptedCount: acceptedFramesRef.current.length,
+          targetCount: extendedTargetCount,
         }));
-        const nextIndex = activeStepIndex + 1;
-        const isComplete = nextIndex >= FACE_REGISTRATION_STEPS.length;
-        setActiveStepIndex(isComplete ? activeStepIndex : nextIndex);
-        setGuidance(isComplete ? "Đã thu đủ 5 góc, đang tự động lưu" : FACE_REGISTRATION_STEPS[nextIndex].title);
-        setStatus(isComplete ? "complete" : "camera-ready");
+        captureTimeoutRef.current = setTimeout(() => {
+          void runCaptureLoopRef.current?.(nextToken);
+        }, CAPTURE_LOOP_INTERVAL_MS);
+        return;
       }
 
-      resetHoldTracking();
-      window.setTimeout(() => {
-        captureLockRef.current = false;
-      }, 320);
-    };
+      updateSessionStatus("error");
+      setSaveState("error");
+      setSaveMessage(
+        getFriendlyBackendErrorMessage(error, "Không thể gửi dữ liệu khuôn mặt lên máy chủ."),
+      );
+      setLiveFeedback(buildCaptureFeedback("error", { acceptedCount: acceptedFramesRef.current.length, targetCount: activeTargetCount }));
+    }
+  }, [employeeId, targetCount, updateSessionStatus]);
 
-    analysisIntervalRef.current = window.setInterval(() => {
-      void tick();
-    }, 180);
-
-    return () => {
-      if (analysisIntervalRef.current) {
-        window.clearInterval(analysisIntervalRef.current);
-      }
-    };
-  }, [activeStep, activeStepIndex, completedCount, status]);
-
-  useEffect(() => {
-    if (completedCount !== FACE_REGISTRATION_STEPS.length || autoSubmitTriggeredRef.current || saveState === "success") {
+  const scheduleNextCapture = useCallback((token, runner) => {
+    if (!mountedRef.current || token !== sessionTokenRef.current || sessionStatusRef.current !== "collecting") {
       return;
     }
 
-    if (batchFramesRef.current.length < MIN_BATCH_FRAME_COUNT) {
+    captureTimeoutRef.current = setTimeout(() => {
+      void runner(token);
+    }, CAPTURE_LOOP_INTERVAL_MS);
+  }, []);
+
+  const runCaptureLoop = useCallback(async (token) => {
+    if (!mountedRef.current || token !== sessionTokenRef.current || sessionStatusRef.current !== "collecting") {
       return;
     }
 
-    autoSubmitTriggeredRef.current = true;
-    void saveIdentity(true);
-  }, [batchFrameCount, completedCount, saveState]);
+    const videoElement = videoRef.current;
+    if (!videoElement || videoElement.readyState < 2 || modelState !== "ready" || !workCanvasRef.current) {
+      scheduleNextCapture(token, runCaptureLoop);
+      return;
+    }
 
-  function recaptureCurrent() {
-    const currentStep = FACE_REGISTRATION_STEPS[Math.min(activeStepIndex, FACE_REGISTRATION_STEPS.length - 1)];
-    if (!currentStep) return;
+    const nowMs = Date.now();
+    let detections = [];
 
-    resetHoldTracking();
-    autoSubmitTriggeredRef.current = false;
-    resetBatchFrames();
-    setCaptures((current) => ({
-      ...current,
-      [currentStep.id]: null,
-    }));
-    setStatus("camera-ready");
-    setGuidance(currentStep.title);
-    setWarning("");
-    setSaveMessage("");
-    setSaveState("idle");
-  }
+    try {
+      detections = await detectFaces(videoElement, workCanvasRef.current);
+    } catch (error) {
+      console.error("[FaceRegistration] detectFaces failed:", error);
+      setLiveFeedback(
+        buildCaptureFeedback("low_confidence", {
+          acceptedCount: acceptedFramesRef.current.length,
+          targetCount,
+        }),
+      );
+      scheduleNextCapture(token, runCaptureLoop);
+      return;
+    }
 
-  function resetRegistration() {
-    resetHoldTracking();
-    autoSubmitTriggeredRef.current = false;
-    resetBatchFrames();
-    setCaptures(getInitialCaptures());
-    setActiveStepIndex(0);
-    setStatus(systemState.cameraActive ? "camera-ready" : "initializing");
-    setGuidance("Nhìn thẳng");
-    setWarning("");
-    setSaveMessage("");
-    setSaveState("idle");
-  }
+    if (!mountedRef.current || token !== sessionTokenRef.current || sessionStatusRef.current !== "collecting") {
+      return;
+    }
 
-  const steps = FACE_REGISTRATION_STEPS.map((step, index) => ({
-    ...step,
-    status: getStepStatus(index, activeStepIndex, captures),
-  }));
+    const precheck = evaluateFrameQuality({
+      detections,
+      videoWidth: videoElement.videoWidth,
+      videoHeight: videoElement.videoHeight,
+      nowMs,
+      lastAcceptedAtMs: lastAcceptedAtRef.current,
+      blurScore: Number.POSITIVE_INFINITY,
+      config: captureConfigRef.current,
+    });
+
+    if (!precheck.accepted) {
+      setLiveFeedback(
+        buildCaptureFeedback(precheck.reason, {
+          acceptedCount: acceptedFramesRef.current.length,
+          targetCount,
+        }),
+      );
+      scheduleNextCapture(token, runCaptureLoop);
+      return;
+    }
+
+    let cropResult = null;
+    try {
+      cropResult = await cropFace(videoElement, precheck.detection, 0.4);
+    } catch (error) {
+      console.error("[FaceRegistration] cropFace failed:", error);
+    }
+
+    if (!mountedRef.current || token !== sessionTokenRef.current || sessionStatusRef.current !== "collecting") {
+      return;
+    }
+
+    if (!cropResult?.blob || !cropResult?.canvas) {
+      setLiveFeedback(
+        buildCaptureFeedback("blurry", {
+          acceptedCount: acceptedFramesRef.current.length,
+          targetCount,
+        }),
+      );
+      scheduleNextCapture(token, runCaptureLoop);
+      return;
+    }
+
+    const cropContext = cropResult.canvas.getContext("2d", { willReadFrequently: true });
+    const imageData = cropContext?.getImageData(0, 0, cropResult.canvas.width, cropResult.canvas.height);
+    const blurScore = computeBlurScore(imageData);
+    const finalDecision = evaluateFrameQuality({
+      detections: [precheck.detection],
+      videoWidth: videoElement.videoWidth,
+      videoHeight: videoElement.videoHeight,
+      nowMs,
+      lastAcceptedAtMs: lastAcceptedAtRef.current,
+      blurScore,
+      config: captureConfigRef.current,
+    });
+
+    if (!finalDecision.accepted) {
+      setLiveFeedback(
+        buildCaptureFeedback(finalDecision.reason, {
+          acceptedCount: acceptedFramesRef.current.length,
+          targetCount,
+        }),
+      );
+      scheduleNextCapture(token, runCaptureLoop);
+      return;
+    }
+
+    const nextAcceptedFrame = {
+      blob: cropResult.blob,
+      capturedAtMs: nowMs - sessionStartAtRef.current,
+      detectorScore: precheck.detection.score,
+      blurScore,
+      hintPose: mirrorHintPose(finalDecision.hintPose),
+      previewUrl: URL.createObjectURL(cropResult.blob),
+    };
+
+    const nextAcceptedFrames = [...acceptedFramesRef.current, nextAcceptedFrame];
+    acceptedFramesRef.current = nextAcceptedFrames;
+    lastAcceptedAtRef.current = nowMs;
+    setAcceptedFrames(nextAcceptedFrames);
+    setThumbnailFrames(nextAcceptedFrames.slice(-captureConfigRef.current.thumbnailLimit));
+    setLiveFeedback(
+      buildCaptureFeedback("accepted", {
+        acceptedCount: nextAcceptedFrames.length,
+        targetCount,
+      }),
+    );
+
+    if (nextAcceptedFrames.length >= targetCount) {
+      clearCaptureLoop();
+      void submitBatch();
+      return;
+    }
+
+    scheduleNextCapture(token, runCaptureLoop);
+  }, [clearCaptureLoop, modelState, scheduleNextCapture, submitBatch, targetCount]);
+
+  runCaptureLoopRef.current = runCaptureLoop;
+
+  const startRecording = useCallback(() => {
+    if (sessionStatusRef.current !== "idle") return;
+    if (modelState !== "ready" || cameraState !== "ready") return;
+
+    resetCaptureState();
+    updateSessionStatus("collecting");
+    sessionTokenRef.current += 1;
+    sessionStartAtRef.current = Date.now();
+    setTargetCount(captureConfigRef.current.minFrames);
+    setLiveFeedback(buildCaptureFeedback("no_face", { targetCount: captureConfigRef.current.minFrames }));
+    void runCaptureLoop(sessionTokenRef.current);
+  }, [cameraState, modelState, resetCaptureState, runCaptureLoop, updateSessionStatus]);
+
+  const resetRegistration = useCallback(() => {
+    resetCaptureState();
+    updateSessionStatus("idle");
+    setLiveFeedback(buildCaptureFeedback("idle", { targetCount: captureConfigRef.current.minFrames }));
+  }, [resetCaptureState, updateSessionStatus]);
+
+  const canStart = sessionStatus === "idle" && modelState === "ready" && cameraState === "ready";
+  const canReset = sessionStatus === "collecting" || sessionStatus === "error" || acceptedFrames.length > 0;
 
   return {
-    activeStep,
-    batchFrameCount,
-    canSave,
-    captureFlash,
-    captures,
-    completedCount,
+    videoRef,
+    cameraState,
+    cameraError,
+    modelState,
+    sessionStatus,
+    acceptedFrames,
+    acceptedCount: acceptedFrames.length,
+    targetCount,
+    thumbnailFrames,
+    thumbnailLimit: captureConfig.thumbnailLimit,
+    captureConfig,
+    liveFeedback,
+    elapsedMs,
+    softWarningVisible,
+    saveMessage,
+    saveState,
+    canStart,
+    canReset,
     employee: {
       ...employee,
       registration_status:
         employee.registration_status ||
-        (completedCount === FACE_REGISTRATION_STEPS.length
-          ? "Đã đăng ký"
-          : completedCount > 0
-            ? "Đang thực hiện"
-            : "Chưa đăng ký"),
+        (sessionStatus === "success" ? "Đã đăng ký" : "Chưa đăng ký"),
     },
-    faceAnalysis,
-    guidance: warning || guidance,
-    isSaving,
-    recaptureCurrent,
+    startRecording,
     resetRegistration,
-    saveIdentity,
-    saveMessage,
-    saveState,
-    status,
-    steps,
-    systemState,
-    videoRef,
   };
 }

@@ -3,25 +3,26 @@
 Ứng dụng web điểm danh bằng khuôn mặt với 2 luồng chính:
 
 - **Guest**: Nhân viên/khách mở trang `/guest` để quét khuôn mặt bằng camera trình duyệt (YOLO ONNX chạy trong browser) hoặc gửi ảnh đã crop.
-- **Manager**: Đăng nhập tại `/manager` để quản lý nhân viên, đăng ký mẫu khuôn mặt (5 ảnh hoặc batch 20-30 frames), và xem báo cáo điểm danh.
+- **Manager**: Đăng nhập tại `/manager` để quản lý nhân viên, đăng ký mẫu khuôn mặt (upload tĩnh 5 ảnh hoặc scanner goal-based batch 20-30 frames), và xem báo cáo điểm danh.
 
 ## Tính năng hiện tại
 
 ### Guest check-in
-- Quét tự động bằng webcam qua `FaceDetector` API của trình duyệt (hoặc YOLO ONNX nếu hỗ trợ).
+- Quét tự động bằng webcam qua YOLO ONNX chạy trực tiếp trên trình duyệt.
 - YOLO ONNX `yolov12n-face` chạy trực tiếp trong trình duyệt — backend chỉ nhận ảnh đã crop + keypoints, giảm bandwidth đáng kể.
-- Luồng legacy: gửi full frame → backend tự detect + align + embed.
+- Luồng legacy `/api/guest/checkin`: gửi full frame → backend tự detect + align + embed (vẫn còn để tương thích API).
 - Rate limit: 10 request/60 giây/IP (Redis fixed-window).
 - File upload validation: chỉ chấp nhận JPEG, PNG, BMP, WebP.
 
 ### Face enrollment
-- **5-ảnh guided**: Camera browser hướng dẫn chụp 5 góc (thẳng, trái, phải, lên, xuống).
+- **5-ảnh static**: Upload đúng 5 ảnh tĩnh để tạo bộ mẫu operational.
 - **Batch (20-30 frames)**: Tự động chọn frame đẹp nhất, scoring theo blur/brightness/pose, deduplicate by cosine distance.
 - Validation client-side: `no_face`, `multiple_faces`, `insufficient_frames`.
 - Redis index được sync ngay sau khi enrollment thành công.
 
 ### Face recognition pipeline
-- **YOLOv12 face detection** (`.onnx`): bounding box + 5 facial keypoints (2 mắt, mũi, 2 miệng).
+- **Browser YOLOv12 face detection** (`.onnx`): bounding box + 5 facial keypoints (2 mắt, mũi, 2 miệng) cho luồng guest/scanner mới.
+- **Backend YOLOv12** (`.pt`): vẫn dùng trong luồng legacy full-frame và enrollment static.
 - **InsightFace BuffaloL**: trích xuất embedding 512 chiều từ ảnh đã align.
 - **Face alignment**: xoay ảnh theo eye keypoints với padding 50%.
 - **Redis RediSearch**: FLAT index, cosine distance, threshold 0.6.
@@ -39,7 +40,7 @@
 - **Redis** cho session store, rate limiting, và RediSearch vector index.
 - Magic numbers configurable qua `Config` (giờ điểm danh, số mẫu face, batch frame limits, similarity threshold, rate limit).
 - Bare `except` blocks đã được thay bằng logging.
-- `r.keys()` → `r.scan()` iterator cho Redis để tránh blocking O(N) scan.
+- `delete_employee_samples()` đã dùng `SCAN`; riêng `FaceIndexService.refresh()` vẫn dùng `KEYS` khi rebuild full index.
 
 ## Kiến trúc tổng quan
 
@@ -137,7 +138,8 @@ Storage
 |   |-- create_manager.py
 |   `-- migrate_redis_vector.py
 |-- docs/
-|   |-- plans/
+|   |-- Improvement Plan/
+|   |-- Project Codebase/
 |   `-- superpowers/
 |-- docker-compose.yml
 |-- run-local.ps1
@@ -198,6 +200,11 @@ Với thay đổi source code thông thường, chỉ cần:
 docker compose up          # restart containers
 # hoặc
 docker compose restart backend
+```
+Nếu sửa frontend thì còn phải
+```
+cd frontend
+npm run build
 ```
 
 ### Tạo tài khoản manager
@@ -272,7 +279,7 @@ npm test
 | GET | `/api/manager/employees` | — | `{employees}` |
 | POST | `/api/manager/employees` | `{employee_code, full_name, department?, position?}` | `{employee}` |
 | PUT | `/api/manager/employees/:id` | `{...fields}` | `{employee}` |
-| DELETE | `/api/manager/employees/:id` | — | soft-delete, xóa face index |
+| DELETE | `/api/manager/employees/:id` | — | hard-delete employee + xóa face data + xóa attendance events |
 | GET | `/api/manager/employees/:id/face-samples` | — | `{employee, face_samples}` |
 | POST | `/api/manager/employees/:id/face-enrollment` | `FormData(images×5)` | `{employee, face_samples}` |
 | POST | `/api/manager/employees/:id/face-enrollment/batch` | `FormData(frames×N, metadata)` | `{status, face_samples, saved_embedding_count}` |
@@ -309,7 +316,7 @@ npm test
 
 - Mỗi nhân viên chỉ có 1 bản ghi điểm danh/ngày (unique constraint `(employee_id, checkin_date)`).
 - Face index refresh đồng bộ sau enrollment — nếu Redis lỗi sau DB commit có thể không sync.
-- YOLO ONNX model (25 MB) load lần đầu chậm, chưa có lazy-loading strategy.
+- YOLO ONNX model (25 MB) load lần đầu trên browser có thể chậm; backend đã pre-warm InsightFace khi app startup.
 - Không có notification/push cho điểm danh thời gian thực qua WebSocket.
 - Chưa có ghi log/audit trail cho thao tác manager.
 - `failed_checkins` và `failed_scans_today` trong dashboard summary luôn = 0 (stub).

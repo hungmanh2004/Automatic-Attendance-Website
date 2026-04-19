@@ -147,6 +147,15 @@ def _build_batch_response(employee, prepared_samples, batch_result, prepared_emb
     }
 
 
+def _build_capture_config():
+    return {
+        "min_frames": current_app.config.get("FACE_BATCH_MIN_FRAMES", 20),
+        "max_frames": current_app.config.get("FACE_BATCH_MAX_FRAMES", 30),
+        "thumbnail_limit": 10,
+        "min_capture_gap_ms": 700,
+    }
+
+
 @face_enrollment_bp.get("/manager/employees/<int:employee_id>/face-samples")
 def manager_employee_face_samples(employee_id):
     _, error_response = require_manager()
@@ -166,6 +175,7 @@ def manager_employee_face_samples(employee_id):
         {
             "employee": serialize_employee(employee),
             "face_samples": [serialize_face_sample(fs) for fs in face_samples],
+            "capture_config": _build_capture_config(),
         }
     )
 

@@ -92,6 +92,8 @@ class RedisVectorStore(VectorStore):
     def find_best_match(
         self, embedding: list[float], threshold: float = 0.6
     ) -> dict | None:
+        import time
+        t0 = time.perf_counter()
         r = get_redis()
         query_vec = np.array(embedding, dtype=np.float32).tobytes()
 
@@ -105,6 +107,8 @@ class RedisVectorStore(VectorStore):
 
         try:
             results = r.ft(_INDEX_NAME).search(q, query_params={"vec": query_vec})
+            t1 = time.perf_counter()
+            logger.info("[TIMING] Redis KNN search: %.1fms", (t1 - t0) * 1000)
         except Exception:
             logger.exception("RediSearch KNN query failed.")
             return None

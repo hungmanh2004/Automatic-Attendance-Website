@@ -3,19 +3,19 @@ import { Link } from "react-router-dom";
 
 import { useGuestCamera } from "../hooks/useGuestCamera";
 import { useYoloDetection } from "../hooks/useYoloDetection";
-import { captureGuestFrame, submitGuestCheckin } from "../lib/guestApi";
+import { submitGuestCheckinKpts } from "../lib/guestApi";
 import { getFriendlyBackendErrorMessage, getGuestResultCopy } from "../lib/errorMessages";
 import "./GuestCheckinPage.css";
 
-const SCAN_INTERVAL_MS = 2200;
-const SUCCESS_COOLDOWN_SECONDS = 5;
 const MAX_HISTORY_ITEMS = 10;
+// Ngăn chặn duplicate trong lịch sử: không thêm cùng 1 người 2 lần trong khoảng 60 giây
+const CHECKIN_COOLDOWN_MS = 60000;
 
 // Màu bounding box theo trạng thái track
 const BOX_COLORS = {
   detecting: '#00e5ff',    // Cyan
   recognizing: '#ffa726',  // Amber
-  recognized: '#66bb6a',   // Green
+  recognized: '#00FF00',   // Green (rực, chuẩn AI hiện đại)
   unknown: '#ef5350',      // Red
 };
 
@@ -23,13 +23,11 @@ function getTone(status) {
   if (status === "recognized" || status === "already_checked_in") return "success";
   if (status === "multiple_faces") return "warning";
   if (status === "network_error" || status === "unknown") return "danger";
-  if (status === "paused") return "paused";
   return "scanning";
 }
 
-function getStatusLabel(cameraState, scanMode) {
+function getStatusLabel(cameraState) {
   if (cameraState !== "ready") return "Lỗi camera";
-  if (scanMode === "paused") return "Tạm dừng";
   return "Đang quét";
 }
 
@@ -55,6 +53,7 @@ function formatTime(value) {
 }
 
 function formatDateTime(value) {
+  if (!value) return "Đang chờ dữ liệu";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Đang chờ dữ liệu";
   return `${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · ${date.toLocaleDateString()}`;
@@ -77,25 +76,20 @@ export default function GuestCheckinPage() {
     selectedCameraId = "",
     selectCamera,
   } = useGuestCamera();
-  const [scanMode, setScanMode] = useState("scanning");
   const [submissionState, setSubmissionState] = useState("idle");
   const [result, setResult] = useState(null);
-  const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [history, setHistory] = useState([]);
   const [manualFile, setManualFile] = useState(null);
   const [showFallback, setShowFallback] = useState(false);
   const [statusText, setStatusText] = useState("AI đang quét khuôn mặt theo thời gian thực.");
-  const inflightRef = useRef(false);
   const overlayCanvasRef = useRef(null);
   const overlayRafRef = useRef(null);
+  const lastCheckinRef = useRef({ employeeId: null, timestamp: 0 });
 
-  const isScanning = scanMode === "scanning" && cooldownSeconds === 0;
-  const isPaused = scanMode === "paused";
-  const isBusy = submissionState === "loading";
   const cameraReady = cameraState === "ready";
   const copy = useMemo(() => getGuestResultCopy(result), [result]);
 
-  // ── YOLO ONNX Hook ──
+  // ── YOLO ONNX Hook — quét liên tục từ khi mở trang ──
   const {
     modelState,
     modelProgress,
@@ -103,14 +97,33 @@ export default function GuestCheckinPage() {
     getTracksSnapshot,
   } = useYoloDetection({
     videoRef,
-    enabled: isScanning && cameraReady,
+    enabled: cameraReady,
     cameraReady,
   });
 
-  // Khi YOLO nhận diện được kết quả mới → cập nhật UI
+  // Khi backend trả kết quả nhận diện từ YOLO hook
   useEffect(() => {
     if (!yoloResult) return;
-    applyResult(yoloResult);
+
+    const payload = yoloResult;
+
+    // Cập nhật kết quả hiện tại
+    setResult(payload);
+
+    // Chỉ thêm vào lịch sử khi ĐĂNG KÝ THÀNH CÔNG (chưa điểm danh)
+    // + không trùng lặp trong vòng CHECKIN_COOLDOWN_MS
+    if (payload?.status === "recognized") {
+      const empId = payload?.employee_id
+      const now = Date.now()
+      if (
+        empId !== lastCheckinRef.current.employeeId ||
+        now - lastCheckinRef.current.timestamp > CHECKIN_COOLDOWN_MS
+      ) {
+        pushHistory(payload);
+        lastCheckinRef.current = { employeeId: empId, timestamp: now };
+      }
+    }
+    // already_checked_in: chỉ hiện tên trong bbox, KHÔNG thêm lịch sử
   }, [yoloResult]);
 
   // ── Vẽ Bounding Box Overlay ──
@@ -121,44 +134,58 @@ export default function GuestCheckinPage() {
 
     const vw = video.videoWidth || 640;
     const vh = video.videoHeight || 480;
-    canvas.width = vw;
-    canvas.height = vh;
+    const rw = video.offsetWidth  || vw;
+    const rh = video.offsetHeight || vh;
+
+    canvas.width = rw;
+    canvas.height = rh;
+    const scaleX = rw / vw;
+    const scaleY = rh / vh;
     const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, vw, vh);
+    ctx.clearRect(0, 0, rw, rh);
 
     if (modelState !== 'ready') return;
 
     const tracks = getTracksSnapshot();
     for (const track of tracks) {
       const { box, state, result: trackResult } = track;
+      if (!box) continue;
+
       const color = BOX_COLORS[state] || BOX_COLORS.detecting;
 
-      // Vẽ box
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1);
+      const w  = (box.x2 - box.x1) * scaleX;
+      const h  = (box.y2 - box.y1) * scaleY;
+      const x1 = rw - (box.x2 * scaleX);
+      const y1 = box.y1 * scaleY;
 
-      // Nhãn tên
-      const label = state === 'recognized' && trackResult?.full_name
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 4;
+      ctx.strokeRect(x1, y1, w, h);
+
+      // Nhãn tên ở cạnh dưới bbox — hiện tên khi đã nhận diện được
+      const label = (state === 'recognized' || state === 'recognizing') && trackResult?.full_name
         ? trackResult.full_name
         : state === 'recognizing'
           ? 'Đang xác nhận...'
-          : state === 'unknown'
-            ? 'Không xác định'
-            : '';
+          : '';
 
       if (label) {
-        ctx.font = '14px system-ui, sans-serif';
+        ctx.font = 'bold 16px system-ui, sans-serif';
         const tw = ctx.measureText(label).width;
+        const padX = 10;
+        const labelH = 28;
+        const lx = x1;
+        const ly = y1 + h;
+
         ctx.fillStyle = color;
-        ctx.fillRect(box.x1, box.y1 - 22, tw + 10, 22);
-        ctx.fillStyle = '#fff';
-        ctx.fillText(label, box.x1 + 5, box.y1 - 6);
+        ctx.fillRect(lx, ly, tw + padX * 2, labelH);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(label, lx + padX, ly + 20);
       }
     }
   }, [modelState, getTracksSnapshot, videoRef]);
 
-  // Loop vẽ overlay bằng requestAnimationFrame
+  // RAF loop redraw overlay
   useEffect(() => {
     if (!cameraReady || modelState !== 'ready') return;
 
@@ -176,38 +203,8 @@ export default function GuestCheckinPage() {
   useEffect(() => () => stopCamera(), [stopCamera]);
 
   useEffect(() => {
-    if (!isScanning || !cameraReady) return undefined;
-    const timer = window.setInterval(() => {
-      if (!inflightRef.current) {
-        void runAutoScan();
-      }
-    }, SCAN_INTERVAL_MS);
-
-    return () => window.clearInterval(timer);
-  }, [cameraReady, isScanning]);
-
-  useEffect(() => {
-    if (cooldownSeconds <= 0) return undefined;
-    const timer = window.setInterval(() => {
-      setCooldownSeconds((current) => (current <= 1 ? 0 : current - 1));
-    }, 1000);
-
-    return () => window.clearInterval(timer);
-  }, [cooldownSeconds]);
-
-  useEffect(() => {
     if (!cameraReady) {
       setStatusText(cameraError || "Camera đang ngoại tuyến. Hãy kiểm tra quyền truy cập hoặc thiết bị.");
-      return;
-    }
-
-    if (isPaused && cooldownSeconds > 0) {
-      setStatusText(`AI đang tạm dừng. Tự động tiếp tục sau ${cooldownSeconds} giây.`);
-      return;
-    }
-
-    if (isPaused) {
-      setStatusText("Hệ thống đang tạm dừng, nhấn Bắt đầu quét để tiếp tục.");
       return;
     }
 
@@ -217,7 +214,7 @@ export default function GuestCheckinPage() {
     }
 
     setStatusText("AI đang quét khuôn mặt theo thời gian thực.");
-  }, [cameraError, cameraReady, cooldownSeconds, isPaused, result]);
+  }, [cameraError, cameraReady, result]);
 
   function pushHistory(payload) {
     const confidence = getConfidenceValue(payload?.distance);
@@ -232,58 +229,19 @@ export default function GuestCheckinPage() {
     setHistory((current) => [entry, ...current].slice(0, MAX_HISTORY_ITEMS));
   }
 
-  function applyResult(payload) {
-    setResult(payload);
-    pushHistory(payload);
-
-    // Pause briefly after a successful match to avoid duplicate scans from the same person.
-    if (payload?.status === "recognized" || payload?.status === "already_checked_in") {
-      setScanMode("paused");
-      setCooldownSeconds(SUCCESS_COOLDOWN_SECONDS);
-    }
-  }
-
-  async function runAutoScan() {
-    if (!cameraReady || !isScanning || inflightRef.current) return;
-
-    inflightRef.current = true;
-    setSubmissionState("loading");
-
-    try {
-      const frame = await captureGuestFrame(videoRef.current);
-      if (!frame) {
-        applyResult({
-          status: "no_face",
-          message: "Không phát hiện khuôn mặt trong khung quét.",
-          checked_in_at: new Date().toISOString(),
-        });
-        return;
-      }
-
-      const payload = await submitGuestCheckin(frame);
-      applyResult(payload);
-    } catch (error) {
-      applyResult({
-        status: "network_error",
-        message: getFriendlyBackendErrorMessage(error, "Không thể gửi dữ liệu đến backend."),
-        checked_in_at: new Date().toISOString(),
-      });
-    } finally {
-      inflightRef.current = false;
-      setSubmissionState("idle");
-    }
-  }
-
   async function handleManualSubmit(event) {
     event.preventDefault();
-    if (!manualFile || isBusy) return;
+    if (!manualFile || submissionState === "loading") return;
 
     setSubmissionState("loading");
     try {
-      const payload = await submitGuestCheckin(manualFile);
-      applyResult(payload);
+      const payload = await submitGuestCheckinKpts(manualFile, null);
+      setResult(payload);
+      if (payload?.status === "recognized") {
+        pushHistory(payload);
+      }
     } catch (error) {
-      applyResult({
+      setResult({
         status: "network_error",
         message: getFriendlyBackendErrorMessage(error, "Không thể gửi ảnh thủ công đến backend."),
         checked_in_at: new Date().toISOString(),
@@ -319,8 +277,8 @@ export default function GuestCheckinPage() {
           <Link className="btn btn-secondary" to="/manager/login">
             Mở khu quản trị
           </Link>
-          <span className={`kiosk-live-pill tone-${getTone(cameraReady ? (scanMode === "paused" ? "paused" : "recognized") : "network_error")}`}>
-            {getStatusLabel(cameraState, scanMode)}
+          <span className={`kiosk-live-pill tone-${getTone(cameraReady ? result?.status : "network_error")}`}>
+            {getStatusLabel(cameraState)}
           </span>
         </div>
       </section>
@@ -328,7 +286,7 @@ export default function GuestCheckinPage() {
       <section className="kiosk-grid">
         <div className="kiosk-camera-panel panel-dark">
           <div className="kiosk-camera-stage">
-            <video ref={videoRef} className="kiosk-video" autoPlay playsInline muted />
+            <video ref={videoRef} className="kiosk-video kiosk-video--mirrored" autoPlay playsInline muted />
             <canvas
               ref={overlayCanvasRef}
               className="kiosk-detection-canvas"
@@ -353,22 +311,15 @@ export default function GuestCheckinPage() {
             {modelState === 'error' ? (
               <div className="overlay-message" style={{ zIndex: 20 }}>
                 <strong>Lỗi nạp AI</strong>
-                <p>Không tải được model ONNX. Hệ thống sẽ dùng luồng quét cũ.</p>
+                <p>Không tải được model ONNX.</p>
               </div>
             ) : null}
-            <div className={`kiosk-overlay ${cameraReady ? "" : "is-error"} ${isPaused ? "is-paused" : ""}`}>
-              <div className="face-box">
-                <span />
-                <span />
-                <span />
-                <span />
-              </div>
-              {cameraReady && !isPaused ? <div className="laser-line" /> : null}
-              <div className="overlay-status">
-                <span className={`scan-dot ${cameraReady && !isPaused ? "active" : ""}`} />
-                {getStatusLabel(cameraState, scanMode)}
-              </div>
-              {!cameraReady ? (
+            {!cameraReady ? (
+              <div className={`kiosk-overlay is-error`}>
+                <div className="overlay-status">
+                  <span className="scan-dot" />
+                  {getStatusLabel(cameraState)}
+                </div>
                 <div className="overlay-message">
                   <strong>Lỗi camera</strong>
                   <p>{cameraError || "Không kết nối được camera."}</p>
@@ -376,20 +327,14 @@ export default function GuestCheckinPage() {
                     Thử lại camera
                   </button>
                 </div>
-              ) : null}
-              {isPaused ? (
-                <div className="overlay-message">
-                  <strong>Tạm dừng bộ quét AI</strong>
-                  <p>{cooldownSeconds > 0 ? `Tự động tiếp tục sau ${cooldownSeconds} giây.` : "Nhấn Bắt đầu quét để tiếp tục."}</p>
-                </div>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="kiosk-toolbar">
             <div className="stack-sm">
               <span className="section-label">Điều khiển quét</span>
-              <strong>{isPaused ? "Camera đang tạm dừng" : "Camera đang quét liên tục"}</strong>
+              <strong>Camera đang quét liên tục</strong>
             </div>
 
             <div className="kiosk-toolbar-actions">
@@ -400,7 +345,7 @@ export default function GuestCheckinPage() {
                     id="camera-device-select"
                     value={selectedCameraId || cameraDevices[0].deviceId}
                     onChange={handleCameraChange}
-                    disabled={isBusy}
+                    disabled={submissionState === "loading"}
                   >
                     {cameraDevices.map((device) => (
                       <option key={device.deviceId} value={device.deviceId}>
@@ -410,29 +355,6 @@ export default function GuestCheckinPage() {
                   </select>
                 </label>
               ) : null}
-
-              {isPaused ? (
-                <button
-                  type="button"
-                  className="btn btn-success"
-                  onClick={() => {
-                    setCooldownSeconds(0);
-                    setScanMode("scanning");
-                  }}
-                  disabled={!cameraReady || isBusy}
-                >
-                  Bắt đầu quét
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  onClick={() => setScanMode("paused")}
-                  disabled={!cameraReady || isBusy}
-                >
-                  Dừng quét
-                </button>
-              )}
             </div>
           </div>
         </div>
@@ -485,7 +407,7 @@ export default function GuestCheckinPage() {
             <div className="kiosk-meta-grid">
               <div className="kiosk-meta">
                 <span>Trạng thái</span>
-                <strong>{getStatusLabel(cameraState, scanMode)}</strong>
+                <strong>{getStatusLabel(cameraState)}</strong>
               </div>
               <div className="kiosk-meta">
                 <span>Điểm danh</span>
@@ -515,7 +437,7 @@ export default function GuestCheckinPage() {
               {history.length === 0 ? (
                 <div className="empty-state">
                   <h3>Chưa có log</h3>
-                  <p>AI sẽ cập nhật danh sách này ngay khi có lượt quét mới.</p>
+                  <p>AI sẽ cập nhật danh sách này khi có người điểm danh thành công.</p>
                 </div>
               ) : (
                 history.map((entry) => (
@@ -549,7 +471,7 @@ export default function GuestCheckinPage() {
                     onChange={(event) => setManualFile(event.target.files?.[0] ?? null)}
                   />
                 </div>
-                <button type="submit" className="btn btn-primary" disabled={!manualFile || isBusy}>
+                <button type="submit" className="btn btn-primary" disabled={!manualFile || submissionState === "loading"}>
                   Gửi ảnh lên AI
                 </button>
               </form>

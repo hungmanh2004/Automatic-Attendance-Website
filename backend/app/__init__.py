@@ -1,4 +1,5 @@
 import logging
+import sys
 
 from pathlib import Path
 
@@ -77,6 +78,11 @@ def _run_schema_updates():
 def _initialize_services(app):
     storage_service = StorageService(app.config["CHECKIN_DIR"], app.config["FACES_DIR"])
     embedding_service = EmbeddingService()
+    # Pre-warm InsightFace model at startup so first request is fast
+    embedding_logger = logging.getLogger(__name__)
+    embedding_logger.info("Pre-warming InsightFace model...")
+    _ = embedding_service._get_insightface_recognizer()
+    embedding_logger.info("InsightFace model ready.")
     face_index_service = FaceIndexService()
     face_index_service.setup()
     attendance_service = AttendanceService()
@@ -103,6 +109,13 @@ def _initialize_redis(app):
 def create_app(test_config=None):
     app = Flask(__name__)
     app.config.from_object(Config)
+
+    # Enable INFO logging for all services (especially [TIMING] logs)
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    root.handlers = [h for h in root.handlers if not isinstance(h, logging.StreamHandler)] + [handler]
 
     if test_config:
         app.config.update(test_config)

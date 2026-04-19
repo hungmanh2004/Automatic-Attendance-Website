@@ -155,9 +155,9 @@ class EmbeddingService:
 
             face_analysis_module = importlib.import_module("insightface.app")
             face_analysis_class = face_analysis_module.FaceAnalysis
+            # insightface 0.2.1 không hỗ trợ providers= — chỉ dùng ctx_id trong .prepare()
             app = face_analysis_class(
                 name=self._insightface_model_name,
-                providers=self._insightface_providers,
             )
             app.prepare(ctx_id=ctx_id, det_size=self._insightface_det_size)
 
@@ -175,6 +175,8 @@ class EmbeddingService:
                 raise RuntimeError("InsightFace recognition model is unavailable")
 
             self._insightface_recognizer = recognizer
+            logger.info("[InsightFace] Model ready (cached). get_feat call will follow.")
+            return self._insightface_recognizer
 
         return self._insightface_recognizer
 
@@ -261,6 +263,8 @@ class EmbeddingService:
     # (YOLO ONNX chạy trên browser, backend chỉ align + embed)
     # ------------------------------------------------------------------
     def extract_embeddings_from_crop(self, crop_bytes, keypoints_list):
+        import time
+        t0 = time.perf_counter()
         """Nhận ảnh crop đã khoét sẵn + danh sách 5 keypoints, trả về 1 embedding.
 
         Frontend đã chạy YOLO ONNX trên browser để:
@@ -288,6 +292,8 @@ class EmbeddingService:
         if img is None:
             logger.warning("extract_embeddings_from_crop: cannot decode crop image")
             return None
+        t1 = time.perf_counter()
+        logger.info("[TIMING] decode: %.1fms", (t1 - t0) * 1000)
 
         h, w = img.shape[:2]
         if h < 20 or w < 20:
@@ -308,7 +314,10 @@ class EmbeddingService:
         box = (0, 0, w, h)
 
         # Bước 1: Align face dựa trên keypoints local
+        t2 = time.perf_counter()
         aligned_face = align_face(img, kps, box)
+        t3 = time.perf_counter()
+        logger.info("[TIMING] align_face: %.1fms", (t3 - t2) * 1000)
 
         if aligned_face is None or aligned_face.size == 0:
             logger.warning("extract_embeddings_from_crop: alignment produced empty result")
@@ -319,7 +328,15 @@ class EmbeddingService:
             face_for_recognition = cv2.resize(
                 aligned_face, (112, 112), interpolation=cv2.INTER_AREA
             )
-            vector = self._get_insightface_recognizer().get_feat(face_for_recognition)
+            t4 = time.perf_counter()
+            recognizer = self._get_insightface_recognizer()
+            t5 = time.perf_counter()
+            vector = recognizer.get_feat(face_for_recognition)
+            t6 = time.perf_counter()
+            logger.info(
+                "[TIMING] recognizer.prepare: %.1fms | get_feat: %.1fms | TOTAL: %.1fms",
+                (t5 - t4) * 1000, (t6 - t5) * 1000, (t6 - t0) * 1000
+            )
             if vector is None:
                 return None
 

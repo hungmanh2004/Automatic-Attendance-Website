@@ -28,6 +28,8 @@ services:
   frontend:
     build:
       context: ./frontend
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html
     depends_on:
       - backend
     ports:

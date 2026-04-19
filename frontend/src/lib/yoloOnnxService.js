@@ -21,6 +21,7 @@ const INPUT_SIZE = 640           // YOLO input resolution (vuông)
 const CONF_THRESHOLD = 0.45      // Ngưỡng chặn dự đoán yếu
 const IOU_THRESHOLD = 0.5        // Ngưỡng NMS loại box trùng
 const NUM_KEYPOINTS = 5          // 5 điểm mốc: 2 mắt, mũi, 2 mép
+const DEBUG_YOLO = false
 
 // ============================================================
 // State nội bộ (Singleton)
@@ -181,47 +182,58 @@ export async function detectFaces(videoEl, workCanvas) {
   const data = output.data  // Float32Array
   const shape = output.dims // [1, numFeatures, numDetections]
 
-  const numFeatures = shape[1]
-  const numDetections = shape[2]
+  if (DEBUG_YOLO) {
+    console.info(`[YOLO model] output shape=${JSON.stringify(shape)}`)
+  }
+
+  const numDetections = shape[1]
+  const numFeatures = shape[2]
 
   // Decode tất cả detections
+  // Tensor layout: [batch=1, numDetections=300, numFeatures=6]
+  // Với 6 features: [x1, y1, x2, y2, score, ...]
   const candidates = []
 
   for (let d = 0; d < numDetections; d++) {
-    // Score ở index 4
-    const score = data[4 * numDetections + d]
+    const base = d * numFeatures
+
+    // Score ở feature index 4: data[d * 6 + 4]
+    const score = data[base + 4]
     if (score < CONF_THRESHOLD) continue
 
-    // Box: center (cx, cy, w, h) → (x1, y1, x2, y2)
-    const cx = data[0 * numDetections + d]
-    const cy = data[1 * numDetections + d]
-    const w  = data[2 * numDetections + d]
-    const h  = data[3 * numDetections + d]
+    // Box: [x1, y1, x2, y2] — thẳng tọa độ pixel đã decode sẵn
+    const x1 = data[base + 0]
+    const y1 = data[base + 1]
+    const x2 = data[base + 2]
+    const y2 = data[base + 3]
 
     // Chuyển từ tọa độ letterbox → tọa độ video gốc
-    const x1 = (cx - w / 2 - padX) / scale
-    const y1 = (cy - h / 2 - padY) / scale
-    const x2 = (cx + w / 2 - padX) / scale
-    const y2 = (cy + h / 2 - padY) / scale
+    const bx1 = (x1 - padX) / scale
+    const by1 = (y1 - padY) / scale
+    const bx2 = (x2 - padX) / scale
+    const by2 = (y2 - padY) / scale
 
-    // Parse keypoints (nếu model có)
+    // Parse keypoints (nếu model có — feature 5+: 5 điểm × 3 values = 15)
     const keypoints = []
-    const kptOffset = 5 // sau box(4) + score(1)
+    const kptBase = base + 5
     for (let k = 0; k < NUM_KEYPOINTS; k++) {
-      const kx = data[(kptOffset + k * 3)     * numDetections + d]
-      const ky = data[(kptOffset + k * 3 + 1) * numDetections + d]
-      // Chuyển tọa độ keypoint về video gốc
+      const kx = data[kptBase + k * 3]
+      const ky = data[kptBase + k * 3 + 1]
       keypoints.push([
         (kx - padX) / scale,
         (ky - padY) / scale,
       ])
     }
 
-    candidates.push({ box: { x1, y1, x2, y2 }, score, keypoints })
+    candidates.push({ box: { x1: bx1, y1: by1, x2: bx2, y2: by2 }, score, keypoints })
   }
 
   // NMS: loại bỏ các box trùng lặp
-  return nms(candidates, IOU_THRESHOLD)
+  const result = nms(candidates, IOU_THRESHOLD)
+  if (DEBUG_YOLO && result.length > 0) {
+    console.info(`[YOLO] raw=${candidates.length} → nms=${result.length} | first box: x1=${result[0].box.x1.toFixed(0)} y1=${result[0].box.y1.toFixed(0)} score=${result[0].score.toFixed(3)}`)
+  }
+  return result
 }
 
 // ============================================================
@@ -294,7 +306,7 @@ function computeIoU(a, b) {
  * @param {HTMLVideoElement} videoEl
  * @param {{box, keypoints}} detection
  * @param {number} paddingRatio - Tỷ lệ padding (0.4 = 40%)
- * @returns {Promise<{blob: Blob, localKeypoints: number[]}>}
+ * @returns {Promise<{blob: Blob, localKeypoints: number[], canvas: HTMLCanvasElement}>}
  */
 export async function cropFace(videoEl, detection, paddingRatio = 0.4) {
   const vw = videoEl.videoWidth
@@ -321,6 +333,8 @@ export async function cropFace(videoEl, detection, paddingRatio = 0.4) {
   canvas.width = cropW
   canvas.height = cropH
   const ctx = canvas.getContext('2d')
+  ctx.translate(cropW, 0)
+  ctx.scale(-1, 1)
   ctx.drawImage(videoEl, cropX1, cropY1, cropW, cropH, 0, 0, cropW, cropH)
 
   // Re-map keypoints về tọa độ local (trong crop)
@@ -328,8 +342,9 @@ export async function cropFace(videoEl, detection, paddingRatio = 0.4) {
   const localKeypoints = []
   if (keypoints) {
     for (const [kx, ky] of keypoints) {
+      const localX = Math.round(kx - cropX1)
       localKeypoints.push(
-        Math.round(kx - cropX1),
+        cropW - localX,
         Math.round(ky - cropY1),
       )
     }
@@ -340,5 +355,5 @@ export async function cropFace(videoEl, detection, paddingRatio = 0.4) {
     canvas.toBlob(resolve, 'image/jpeg', 0.92)
   })
 
-  return { blob, localKeypoints }
+  return { blob, localKeypoints, canvas }
 }

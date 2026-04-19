@@ -77,11 +77,13 @@ describe("GuestCheckinPage", () => {
   });
 
   it("renders the guest check-in camera page", () => {
-    renderGuestPage();
+    const { container } = renderGuestPage();
 
     expect(screen.getByRole("heading", { name: /điểm danh khuôn mặt thông minh/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /dừng quét/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /mở khu quản trị/i })).toBeInTheDocument();
+    expect(container.querySelector(".kiosk-video--mirrored")).toBeInTheDocument();
+    expect(container.querySelector(".kiosk-detection-canvas--mirrored")).toBeInTheDocument();
   });
 
   it("renders unknown and multiple_faces result copy", async () => {

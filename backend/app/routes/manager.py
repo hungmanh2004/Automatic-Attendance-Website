@@ -6,7 +6,7 @@ from flask import Blueprint, current_app, jsonify, request, send_file, url_for
 from sqlalchemy.exc import IntegrityError
 
 from ..extensions import db
-from ..models import Employee
+from ..models import AttendanceEvent, Employee, FaceEmbedding, FaceSample
 from ..services.auth import (
     authenticate_manager,
     list_employees,
@@ -189,17 +189,21 @@ def manager_delete_employee(employee_id):
     if employee is None:
         return jsonify({"status": "employee_not_found"}), 404
 
-    # Keep historical attendance rows, but disable recognition and hide the employee operationally.
-    employee.is_active = False
+    # --- Cascade cleanup (DB side via cascade relationships) ---
+    # Delete face-related records and files first (outside transaction for file I/O)
+    deleted_face_samples = _delete_face_samples_for_employee(employee.id)
+
+    # --- Hard-delete the employee (cascade deletes FaceSample, FaceEmbedding, AttendanceEvent) ---
+    deleted_attendance_count = AttendanceEvent.query.filter_by(employee_id=employee.id).count()
+    db.session.delete(employee)
     db.session.commit()
 
-    deleted_samples = _delete_face_samples_for_employee(employee.id)
     return jsonify(
         {
             "status": "deleted",
             "employee_id": employee.id,
-            "deactivated": True,
-            "deleted_face_samples": len(deleted_samples),
+            "deleted_face_samples": len(deleted_face_samples),
+            "deleted_attendance_events": deleted_attendance_count,
         }
     )
 
