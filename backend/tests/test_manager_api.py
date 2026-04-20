@@ -2,15 +2,9 @@ from pathlib import Path
 
 from werkzeug.security import generate_password_hash
 
-
-try:
-    from backend.app import create_app
-    from backend.app.extensions import db
-    from backend.app.models import Employee, FaceEmbedding, FaceSample, ManagerUser
-except ModuleNotFoundError:
-    from app import create_app
-    from app.extensions import db
-    from app.models import Employee, FaceEmbedding, FaceSample, ManagerUser
+from backend.app import create_app
+from backend.app.extensions import db
+from backend.app.models import Employee, FaceEmbedding, FaceSample, ManagerUser
 
 
 def _create_manager(app, username="manager", password="secret123"):
@@ -361,7 +355,7 @@ def test_manager_delete_employee_returns_404_for_missing_employee(app, client):
     assert response.get_json()["status"] == "employee_not_found"
 
 
-def test_manager_delete_employee_soft_deletes_and_clears_faces(app, client):
+def test_manager_delete_employee_hard_deletes_and_clears_faces(app, client):
     manager = _create_manager(app)
     employee = _create_employee(app, employee_code="EMP-300", full_name="Delete Me")
 
@@ -371,13 +365,13 @@ def test_manager_delete_employee_soft_deletes_and_clears_faces(app, client):
     )
     assert login_response.status_code == 200
 
-    refresh_calls = {"count": 0}
+    deleted_employee_ids = []
 
     class FakeFaceIndexService:
-        def refresh(self):
-            refresh_calls["count"] += 1
+        def delete_employee(self, employee_id):
+            deleted_employee_ids.append(employee_id)
 
-    app.extensions["face_index_service"] = FakeFaceIndexService()
+    app.extensions["face_sample_service"].face_index_service = FakeFaceIndexService()
 
     with app.app_context():
         sample = FaceSample(
@@ -408,14 +402,14 @@ def test_manager_delete_employee_soft_deletes_and_clears_faces(app, client):
     assert response.get_json() == {
         "status": "deleted",
         "employee_id": employee["id"],
-        "deactivated": True,
         "deleted_face_samples": 1,
+        "deleted_attendance_events": 0,
     }
-    assert refresh_calls["count"] == 1
+    assert deleted_employee_ids == [employee["id"]]
 
     with app.app_context():
         deleted_employee = db.session.get(Employee, employee["id"])
-        assert deleted_employee.is_active is False
+        assert deleted_employee is None
         assert FaceSample.query.filter_by(employee_id=employee["id"]).count() == 0
         assert FaceEmbedding.query.filter_by(employee_id=employee["id"]).count() == 0
         assert sample_path.exists() is False

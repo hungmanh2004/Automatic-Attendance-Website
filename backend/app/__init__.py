@@ -5,9 +5,8 @@ from pathlib import Path
 
 from flask import Flask
 from flask_session import Session
-from sqlalchemy import inspect, text
-from sqlalchemy.exc import OperationalError
 
+from .bootstrap import run_schema_updates
 from .config import Config
 from .extensions import db
 from .routes.manager import manager_bp
@@ -16,7 +15,10 @@ from .routes.guest import guest_bp
 from .routes.health import health_bp
 from .services.attendance import AttendanceService
 from .services.embedding import EmbeddingService
+from .services.employees import EmployeeService
 from .services.face_index import FaceIndexService
+from .services.face_enrollment import FaceEnrollmentService
+from .services.face_samples import FaceSampleService
 from .services.recognition import RecognitionService
 from .services.storage import StorageService
 
@@ -48,31 +50,7 @@ def _initialize_database(app):
         except Exception as e:
             logger.error("Failed to create database tables: %s", e)
             db.session.rollback()
-        _run_schema_updates()
-
-
-def _run_schema_updates():
-    inspector = inspect(db.engine)
-    employee_columns = {column["name"] for column in inspector.get_columns("employees")}
-    if "department" not in employee_columns:
-        try:
-            db.session.execute(text("ALTER TABLE employees ADD COLUMN department VARCHAR(255) DEFAULT 'Văn phòng'"))
-        except OperationalError as error:
-            if "duplicate column name: department" not in str(error):
-                raise
-            db.session.rollback()
-        db.session.execute(text("UPDATE employees SET department = 'Văn phòng' WHERE department IS NULL"))
-        db.session.commit()
-
-    if "position" not in employee_columns:
-        try:
-            db.session.execute(text("ALTER TABLE employees ADD COLUMN position VARCHAR(255) DEFAULT 'Nhân viên'"))
-        except OperationalError as error:
-            if "duplicate column name: position" not in str(error):
-                raise
-            db.session.rollback()
-        db.session.execute(text("UPDATE employees SET position = 'Nhân viên' WHERE position IS NULL"))
-        db.session.commit()
+        run_schema_updates(db, app.config["SQLALCHEMY_DATABASE_URI"])
 
 
 def _initialize_services(app):
@@ -81,10 +59,16 @@ def _initialize_services(app):
     # Pre-warm InsightFace model at startup so first request is fast
     embedding_logger = logging.getLogger(__name__)
     embedding_logger.info("Pre-warming InsightFace model...")
-    _ = embedding_service._get_insightface_recognizer()
+    embedding_service.prewarm()
     embedding_logger.info("InsightFace model ready.")
-    face_index_service = FaceIndexService()
+    face_index_service = FaceIndexService(threshold=app.config["FACE_MATCH_THRESHOLD"])
     face_index_service.setup()
+    face_sample_service = FaceSampleService(
+        db=db,
+        faces_dir=app.config["FACES_DIR"],
+        storage_service=storage_service,
+        face_index_service=face_index_service,
+    )
     attendance_service = AttendanceService()
     recognition_service = RecognitionService(
         storage_service=storage_service,
@@ -96,6 +80,18 @@ def _initialize_services(app):
     app.extensions["storage_service"] = storage_service
     app.extensions["embedding_service"] = embedding_service
     app.extensions["face_index_service"] = face_index_service
+    app.extensions["face_sample_service"] = face_sample_service
+    app.extensions["employee_service"] = EmployeeService(
+        db=db,
+        face_sample_service=face_sample_service,
+    )
+    app.extensions["face_enrollment_service"] = FaceEnrollmentService(
+        db=db,
+        storage_service=storage_service,
+        embedding_service=lambda: app.extensions["embedding_service"],
+        face_index_service=lambda: app.extensions["face_index_service"],
+        face_sample_service=face_sample_service,
+    )
     app.extensions["attendance_service"] = attendance_service
     app.extensions["recognition_service"] = recognition_service
 

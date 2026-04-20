@@ -4,14 +4,9 @@ from pathlib import Path
 import pytest
 from werkzeug.datastructures import MultiDict
 
-try:
-    from backend.app.extensions import db
-    from backend.app.models import Employee, FaceEmbedding, FaceSample
-    from backend.tests.test_manager_api import _create_employee, _create_manager
-except ModuleNotFoundError:
-    from app.extensions import db
-    from app.models import Employee, FaceEmbedding, FaceSample
-    from tests.test_manager_api import _create_employee, _create_manager
+from backend.app.extensions import db
+from backend.app.models import Employee, FaceEmbedding, FaceSample
+from backend.tests.test_manager_api import _create_employee, _create_manager
 
 
 def _login_manager(client, manager):
@@ -140,6 +135,32 @@ def test_face_sample_image_returns_file_bytes(app, client):
 
     assert response.status_code == 200
     assert response.data == b"face-image"
+
+
+def test_face_sample_image_rejects_paths_outside_faces_dir(app, client):
+    manager = _create_manager(app)
+    employee = _create_employee(app, employee_code="EMP-203", full_name="Unsafe Path")
+
+    outside_path = Path(app.config["APP_DB_PATH"]).parent / "outside-face.jpg"
+    outside_path.write_bytes(b"outside-face")
+
+    with app.app_context():
+        db.session.add(
+            FaceSample(
+                employee_id=employee["id"],
+                sample_index=1,
+                image_path=str(outside_path),
+                embedding_json="[0.1, 0.2, 0.3]",
+            )
+        )
+        db.session.commit()
+
+    _login_manager(client, manager)
+
+    response = client.get(f"/api/manager/employees/{employee['id']}/face-samples/1/image")
+
+    assert response.status_code == 404
+    assert response.get_json()["status"] == "face_sample_not_found"
 
 
 def test_face_enrollment_requires_authentication(client):
@@ -272,12 +293,12 @@ def test_face_enrollment_rejects_multiple_faces_and_cleans_files(app, client):
     assert list(Path(app.config["FACES_DIR"]).rglob("*")) == []
 
 
-def test_face_enrollment_persists_five_samples_and_refreshes_index(app, client):
+def test_face_enrollment_persists_five_samples_and_upserts_index(app, client):
     manager = _create_manager(app)
     employee = _create_employee(app, employee_code="EMP-305", full_name="Grace Hopper")
     _login_manager(client, manager)
 
-    refresh_calls = {"count": 0}
+    upsert_calls = []
 
     class FakeEmbeddingService:
         def extract_embeddings(self, frame_bytes):
@@ -285,8 +306,8 @@ def test_face_enrollment_persists_five_samples_and_refreshes_index(app, client):
             return [[float(ord(suffix[-1])) / 100.0, 0.2, 0.3]]
 
     class FakeFaceIndexService:
-        def refresh(self):
-            refresh_calls["count"] += 1
+        def upsert(self, **kwargs):
+            upsert_calls.append(kwargs)
 
     app.extensions["embedding_service"] = FakeEmbeddingService()
     app.extensions["face_index_service"] = FakeFaceIndexService()
@@ -302,7 +323,8 @@ def test_face_enrollment_persists_five_samples_and_refreshes_index(app, client):
     assert payload["employee"]["employee_code"] == "EMP-305"
     assert payload["face_sample_count"] == 5
     assert [sample["sample_index"] for sample in payload["face_samples"]] == [1, 2, 3, 4, 5]
-    assert refresh_calls["count"] == 1
+    assert [call["sample_index"] for call in upsert_calls] == [1, 2, 3, 4, 5]
+    assert {call["employee_id"] for call in upsert_calls} == {employee["id"]}
 
     with app.app_context():
         rows = FaceSample.query.filter_by(employee_id=employee["id"]).order_by(FaceSample.sample_index.asc()).all()
@@ -444,12 +466,12 @@ def test_face_sample_replace_validates_sample_index(app, client):
     assert response.get_json()["status"] == "invalid_request"
 
 
-def test_face_sample_replace_updates_existing_slot_and_refreshes_index(app, client):
+def test_face_sample_replace_updates_existing_slot_and_upserts_index(app, client):
     manager = _create_manager(app)
     employee = _create_employee(app, employee_code="EMP-312", full_name="Replace Me")
     _login_manager(client, manager)
 
-    refresh_calls = {"count": 0}
+    upsert_calls = []
 
     class FakeEmbeddingService:
         def extract_embeddings(self, frame_bytes):
@@ -457,8 +479,8 @@ def test_face_sample_replace_updates_existing_slot_and_refreshes_index(app, clie
             return [[0.9, 0.2, 0.3]]
 
     class FakeFaceIndexService:
-        def refresh(self):
-            refresh_calls["count"] += 1
+        def upsert(self, **kwargs):
+            upsert_calls.append(kwargs)
 
     app.extensions["embedding_service"] = FakeEmbeddingService()
     app.extensions["face_index_service"] = FakeFaceIndexService()
@@ -488,7 +510,15 @@ def test_face_sample_replace_updates_existing_slot_and_refreshes_index(app, clie
     assert payload["status"] == "updated"
     assert payload["face_sample"]["sample_index"] == 3
     assert payload["face_sample"]["employee_id"] == employee["id"]
-    assert refresh_calls["count"] == 1
+    assert upsert_calls == [
+        {
+            "employee_id": employee["id"],
+            "sample_index": 3,
+            "employee_code": "EMP-312",
+            "full_name": "Replace Me",
+            "embedding": [0.9, 0.2, 0.3],
+        }
+    ]
 
     with app.app_context():
         sample = FaceSample.query.filter_by(employee_id=employee["id"], sample_index=3).one()
@@ -506,7 +536,7 @@ def test_face_sample_replace_creates_missing_slot(app, client):
             return [[0.5, 0.2, 0.3]]
 
     class FakeFaceIndexService:
-        def refresh(self):
+        def upsert(self, **kwargs):
             return None
 
     app.extensions["embedding_service"] = FakeEmbeddingService()
@@ -588,24 +618,24 @@ def test_face_deletion_returns_404_for_missing_employee(app, client):
     assert response.get_json()["status"] == "employee_not_found"
 
 
-def test_face_deletion_allows_zero_samples_and_refreshes_index(app, client):
+def test_face_deletion_allows_zero_samples_and_deletes_index_entries(app, client):
     manager = _create_manager(app)
     employee = _create_employee(app, employee_code="EMP-307", full_name="Empty Face")
     _login_manager(client, manager)
 
-    refresh_calls = {"count": 0}
+    deleted_employee_ids = []
 
     class FakeFaceIndexService:
-        def refresh(self):
-            refresh_calls["count"] += 1
+        def delete_employee(self, employee_id):
+            deleted_employee_ids.append(employee_id)
 
-    app.extensions["face_index_service"] = FakeFaceIndexService()
+    app.extensions["face_sample_service"].face_index_service = FakeFaceIndexService()
 
     response = client.delete(f"/api/manager/employees/{employee['id']}/face-samples")
 
     assert response.status_code == 200
     assert response.get_json() == {"employee_id": employee["id"], "deleted_count": 0}
-    assert refresh_calls["count"] == 1
+    assert deleted_employee_ids == [employee["id"]]
 
 
 def test_face_deletion_removes_all_samples_and_files(app, client):
@@ -613,13 +643,13 @@ def test_face_deletion_removes_all_samples_and_files(app, client):
     employee = _create_employee(app, employee_code="EMP-308", full_name="Delete Me")
     _login_manager(client, manager)
 
-    refresh_calls = {"count": 0}
+    deleted_employee_ids = []
 
     class FakeFaceIndexService:
-        def refresh(self):
-            refresh_calls["count"] += 1
+        def delete_employee(self, employee_id):
+            deleted_employee_ids.append(employee_id)
 
-    app.extensions["face_index_service"] = FakeFaceIndexService()
+    app.extensions["face_sample_service"].face_index_service = FakeFaceIndexService()
 
     with app.app_context():
         rows = []
@@ -641,7 +671,7 @@ def test_face_deletion_removes_all_samples_and_files(app, client):
 
     assert response.status_code == 200
     assert response.get_json() == {"employee_id": employee["id"], "deleted_count": 5}
-    assert refresh_calls["count"] == 1
+    assert deleted_employee_ids == [employee["id"]]
 
     with app.app_context():
         assert FaceSample.query.filter_by(employee_id=employee["id"]).count() == 0
@@ -701,8 +731,8 @@ def test_face_batch_enrollment_persists_preview_samples_and_embeddings(app, clie
     payload = response.get_json()
     assert payload["status"] == "enrolled_from_batch"
     assert payload["face_sample_count"] == 5
-    assert payload["valid_frame_count"] == 20
-    assert payload["selected_frame_count"] == 20
+    assert payload["valid_frame_count"] == 10
+    assert payload["selected_frame_count"] == 10
     assert payload["saved_embedding_count"] == 11
     assert payload["representative_embedding_count"] == 10
     assert [sample["sample_index"] for sample in payload["face_samples"]] == [1, 2, 3, 4, 5]

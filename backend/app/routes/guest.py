@@ -1,12 +1,10 @@
 from flask import Blueprint, current_app, jsonify, request
 
+from ..services.image_validation import is_allowed_image_filename, read_non_empty_upload
 from ..services.rate_limiter import RateLimiter
 from .helpers import invalid_request
 
 import json
-import logging
-
-logger = logging.getLogger(__name__)
 
 guest_bp = Blueprint("guest", __name__)
 
@@ -24,13 +22,6 @@ def _get_rate_limiter():
     return _guest_rate_limiter
 
 
-ALLOWED_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "bmp", "webp"}
-
-
-def _allowed_image(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
-
-
 @guest_bp.post("/guest/checkin")
 def guest_checkin():
     if _get_rate_limiter().is_limited(request.remote_addr):
@@ -40,11 +31,11 @@ def guest_checkin():
     if frame is None or not frame.filename:
         return invalid_request("frame is required")
 
-    if not _allowed_image(frame.filename):
+    if not is_allowed_image_filename(frame.filename):
         return invalid_request("frame must be a JPEG, PNG, BMP, or WebP image")
 
-    frame_bytes = frame.read()
-    if not frame_bytes:
+    frame_bytes = read_non_empty_upload(frame)
+    if frame_bytes is None:
         return invalid_request("frame is required")
 
     recognition_service = current_app.extensions["recognition_service"]
@@ -77,11 +68,11 @@ def guest_checkin_kpts():
     if crop is None or not crop.filename:
         return invalid_request("crop is required")
 
-    if not _allowed_image(crop.filename):
+    if not is_allowed_image_filename(crop.filename):
         return invalid_request("crop must be a JPEG, PNG, BMP, or WebP image")
 
-    crop_bytes = crop.read()
-    if not crop_bytes:
+    crop_bytes = read_non_empty_upload(crop)
+    if crop_bytes is None:
         return invalid_request("crop image is empty")
 
     # Giới hạn kích thước: tối thiểu 1KB, tối đa 2MB

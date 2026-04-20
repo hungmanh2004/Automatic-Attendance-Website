@@ -1,7 +1,20 @@
-try:
-    from backend.app.extensions import db
-except ModuleNotFoundError:
-    from app.extensions import db
+from backend.app.extensions import db
+
+
+def test_app_wires_face_index_threshold_from_config(tmp_path):
+    from backend.app import create_app
+
+    app = create_app(
+        {
+            "TESTING": True,
+            "APP_DB_PATH": tmp_path / "app.db",
+            "CHECKIN_DIR": tmp_path / "checkins",
+            "FACES_DIR": tmp_path / "faces",
+            "FACE_MATCH_THRESHOLD": 0.37,
+        }
+    )
+
+    assert app.extensions["face_index_service"].threshold == 0.37
 
 
 def test_health_endpoint_returns_ok(client):
