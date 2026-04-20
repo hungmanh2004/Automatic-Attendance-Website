@@ -118,10 +118,6 @@ export default function AttendancePage() {
   }, [location.pathname, navigate, setUnauthenticated]);
 
   useEffect(() => {
-    setCurrentPage(1);
-  }, [filters.from, filters.to, filters.search, filters.department, filters.position, filters.status]);
-
-  useEffect(() => {
     let cancelled = false;
 
     async function loadAttendance() {
@@ -173,6 +169,7 @@ export default function AttendancePage() {
       ...current,
       ...range,
     }));
+    setCurrentPage(1);
   }
 
   const departmentOptions = useMemo(() => {
@@ -288,18 +285,18 @@ export default function AttendancePage() {
       <section className="attendance-filters glass-panel">
         <div className="field">
           <label htmlFor="attendance-from">Từ ngày</label>
-          <input id="attendance-from" type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} />
+          <input id="attendance-from" type="date" value={filters.from} onChange={(event) => { setFilters((current) => ({ ...current, from: event.target.value })); setCurrentPage(1); }} />
         </div>
         <div className="field">
           <label htmlFor="attendance-to">Đến ngày</label>
-          <input id="attendance-to" type="date" value={filters.to} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} />
+          <input id="attendance-to" type="date" value={filters.to} onChange={(event) => { setFilters((current) => ({ ...current, to: event.target.value })); setCurrentPage(1); }} />
         </div>
         <div className="field">
           <label htmlFor="attendance-search">Tìm nhân viên</label>
           <input
             id="attendance-search"
             value={filters.search}
-            onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
+            onChange={(event) => { setFilters((current) => ({ ...current, search: event.target.value })); setCurrentPage(1); }}
             placeholder="Tìm theo mã NV hoặc tên"
           />
         </div>
@@ -308,7 +305,7 @@ export default function AttendancePage() {
           <select
             id="attendance-department"
             value={filters.department}
-            onChange={(event) => setFilters((current) => ({ ...current, department: event.target.value, position: "all" }))}
+            onChange={(event) => { setFilters((current) => ({ ...current, department: event.target.value, position: "all" })); setCurrentPage(1); }}
           >
             {departmentOptions.map((option) => (
               <option key={option} value={option}>
@@ -319,7 +316,7 @@ export default function AttendancePage() {
         </div>
         <div className="field">
           <label htmlFor="attendance-position">Chức vụ</label>
-          <select id="attendance-position" value={filters.position} onChange={(event) => setFilters((current) => ({ ...current, position: event.target.value }))}>
+          <select id="attendance-position" value={filters.position} onChange={(event) => { setFilters((current) => ({ ...current, position: event.target.value })); setCurrentPage(1); }}>
             {positionOptions.map((option) => (
               <option key={option} value={option}>
                 {option === "all" ? "Tất cả chức vụ" : option}
@@ -329,7 +326,7 @@ export default function AttendancePage() {
         </div>
         <div className="field">
           <label htmlFor="attendance-status">Trạng thái</label>
-          <select id="attendance-status" value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}>
+          <select id="attendance-status" value={filters.status} onChange={(event) => { setFilters((current) => ({ ...current, status: event.target.value })); setCurrentPage(1); }}>
             <option value="all">Tất cả</option>
             <option value="on_time">Đúng giờ</option>
             <option value="late">Đi muộn</option>
