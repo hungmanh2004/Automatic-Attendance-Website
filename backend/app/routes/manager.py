@@ -89,8 +89,13 @@ def manager_employees():
     if error_response is not None:
         return error_response
 
+    department = normalize_text(request.args.get("department"))
+    position = normalize_text(request.args.get("position"))
     employee_service = get_service("employee_service")
-    return jsonify({"employees": employee_service.list_employees()})
+    return jsonify({"employees": employee_service.list_employees(
+        department=department or None,
+        position=position or None,
+    )})
 
 
 @manager_bp.post("/manager/employees")

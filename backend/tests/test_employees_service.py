@@ -39,8 +39,13 @@ def _make_service():
     return EmployeeService(db=db, face_sample_service=face_sample_service), face_sample_service
 
 
-def _create_employee(employee_code="EMP-001", full_name="Ada Lovelace"):
-    employee = Employee(employee_code=employee_code, full_name=full_name)
+def _create_employee(employee_code="EMP-001", full_name="Ada Lovelace", department=None, position=None):
+    employee = Employee(
+        employee_code=employee_code,
+        full_name=full_name,
+        department=department or "Văn phòng",
+        position=position or "Nhân viên",
+    )
     db.session.add(employee)
     db.session.commit()
     return employee
@@ -152,3 +157,33 @@ def test_delete_employee_hard_deletes_and_coordinates_face_cleanup(app):
         ]
         assert face_sample_service.cleanup_calls == [face_sample_service.deletion_result]
         assert face_sample_service.index_delete_calls == [employee_id]
+
+
+def test_list_employees_filters_by_department(app):
+    service, _ = _make_service()
+    with app.app_context():
+        _create_employee(employee_code="EMP-100", full_name="A", department="IT")
+        _create_employee(employee_code="EMP-101", full_name="B", department="HR")
+        result = service.list_employees(department="IT")
+        assert len(result) == 1
+        assert result[0]["employee_code"] == "EMP-100"
+
+
+def test_list_employees_filters_by_position(app):
+    service, _ = _make_service()
+    with app.app_context():
+        _create_employee(employee_code="EMP-200", full_name="X", position="Engineer")
+        _create_employee(employee_code="EMP-201", full_name="Y", position="Manager")
+        result = service.list_employees(position="Engineer")
+        assert len(result) == 1
+        assert result[0]["employee_code"] == "EMP-200"
+
+
+def test_list_employees_filters_by_both(app):
+    service, _ = _make_service()
+    with app.app_context():
+        _create_employee(employee_code="EMP-300", full_name="P", department="IT", position="Engineer")
+        _create_employee(employee_code="EMP-301", full_name="Q", department="IT", position="Manager")
+        result = service.list_employees(department="IT", position="Engineer")
+        assert len(result) == 1
+        assert result[0]["employee_code"] == "EMP-300"
