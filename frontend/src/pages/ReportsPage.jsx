@@ -22,6 +22,7 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [pagination, setPagination] = useState({ page: 1, per_page: 50, total: 0, pages: 0 });
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,7 +34,7 @@ export default function ReportsPage() {
         // Request a large batch for report export.
         const [dashboardPayload, attendancePayload] = await Promise.all([
           fetchDashboardSummary(),
-          listAttendance({ page: 1, per_page: 200 }),
+          listAttendance({ page: currentPage, per_page: 200 }),
         ]);
         if (cancelled) return;
         setDashboard(dashboardPayload);
@@ -62,7 +63,7 @@ export default function ReportsPage() {
     return () => {
       cancelled = true;
     };
-  }, [setUnauthenticated]);
+  }, [setUnauthenticated, currentPage]);
 
   const cards = useMemo(() => {
     const summary = dashboard?.summary || {};
@@ -123,13 +124,21 @@ export default function ReportsPage() {
               </div>
 
               <div className="report-actions">
-                <button type="button" className="btn btn-primary" onClick={handleExportAll}>
+                <button type="button" className="btn btn-primary" onClick={handleExportAll} title="Xuất CSV của trang hiện tại">
                   Tải lịch sử CSV
                 </button>
                 <button type="button" className="btn btn-secondary" onClick={handleExportSummary}>
                   Tải tổng hợp KPI
                 </button>
               </div>
+
+              {pagination.pages > 1 && (
+                <div className="pagination-controls" style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginTop: '1rem' }}>
+                  <button type="button" className="btn btn-secondary" disabled={currentPage <= 1} onClick={() => setCurrentPage(p => p - 1)}>← Trước</button>
+                  <span>Trang {currentPage} / {pagination.pages}</span>
+                  <button type="button" className="btn btn-secondary" disabled={currentPage >= pagination.pages} onClick={() => setCurrentPage(p => p + 1)}>Sau →</button>
+                </div>
+              )}
             </article>
 
             <article className="glass-panel employee-create-panel">
