@@ -1,12 +1,13 @@
 import json
 
 from .redis_vector_store import RedisVectorStore
+from .vector_store import VectorStore
 
 
 class FaceIndexService:
-    def __init__(self, threshold=0.6):
+    def __init__(self, store: VectorStore | None = None, threshold: float = 0.6):
         self.threshold = threshold
-        self._store = RedisVectorStore()
+        self._store = store or RedisVectorStore()
 
     def setup(self) -> None:
         self._store.setup_index()
@@ -43,11 +44,17 @@ class FaceIndexService:
 
         from .redis_client import get_redis
 
-        # Delete ALL face:* keys from Redis (wildcard pattern, not a real employee_id)
+        # Delete ALL face:* keys incrementally so Redis is not blocked by a wildcard scan.
         r = get_redis()
-        all_face_keys = r.keys("face:*")
-        if all_face_keys:
-            r.delete(*all_face_keys)
+        batch = []
+        for key in r.scan_iter(match="face:*", count=500):
+            batch.append(key)
+            if len(batch) >= 500:
+                r.delete(*batch)
+                batch.clear()
+        if batch:
+            r.delete(*batch)
+
         samples = FaceSample.query.all()
         for sample in samples:
             self._store.upsert_face_sample(

@@ -183,6 +183,9 @@ class EmbeddingService:
     # ------------------------------------------------------------------
     # Public API – giữ nguyên signature cũ để không phá code gọi bên ngoài
     # ------------------------------------------------------------------
+    def prewarm(self) -> None:
+        self._get_insightface_recognizer()
+
     def extract_embeddings(self, frame_bytes):
         """Nhận raw bytes ảnh, trả về list các embedding vectors.
 

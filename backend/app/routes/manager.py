@@ -3,20 +3,14 @@ from datetime import datetime
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request, send_file, url_for
-from sqlalchemy.exc import IntegrityError
 
-from ..extensions import db
-from ..models import AttendanceEvent, Employee, FaceEmbedding, FaceSample
 from ..services.auth import (
     authenticate_manager,
-    list_employees,
     login_manager,
     logout_manager,
     require_manager,
-    serialize_employee,
     serialize_manager,
 )
-from .face_enrollment import _delete_face_samples_for_employee
 from .helpers import (
     attendance_not_found,
     get_service,
@@ -95,7 +89,8 @@ def manager_employees():
     if error_response is not None:
         return error_response
 
-    return jsonify({"employees": list_employees()})
+    employee_service = get_service("employee_service")
+    return jsonify({"employees": employee_service.list_employees()})
 
 
 @manager_bp.post("/manager/employees")
@@ -104,35 +99,9 @@ def manager_create_employee():
     if error_response is not None:
         return error_response
 
-    payload = request.get_json(silent=True) or {}
-    employee_code = normalize_text(payload.get("employee_code"))
-    full_name = normalize_text(payload.get("full_name"))
-    department = normalize_text(payload.get("department")) or "Văn phòng"
-    position = normalize_text(payload.get("position")) or "Nhân viên"
-    if not employee_code or not full_name:
-        return invalid_request("employee_code and full_name are required")
-
-    existing_employee = Employee.query.filter_by(employee_code=employee_code).first()
-    if existing_employee is not None:
-        return jsonify({"status": "duplicate_employee_code"}), 409
-
-    employee = Employee(
-        employee_code=employee_code,
-        full_name=full_name,
-        department=department,
-        position=position,
-    )
-    db.session.add(employee)
-    try:
-        db.session.commit()
-    except IntegrityError:
-        db.session.rollback()
-        code_conflict = Employee.query.filter_by(employee_code=employee_code).first()
-        if code_conflict is not None:
-            return jsonify({"status": "duplicate_employee_code"}), 409
-        raise
-
-    return jsonify({"employee": serialize_employee(employee)}), 201
+    employee_service = get_service("employee_service")
+    result = employee_service.create_employee(request.get_json(silent=True) or {})
+    return jsonify(result.payload), result.http_status
 
 
 @manager_bp.put("/manager/employees/<int:employee_id>")
@@ -141,42 +110,9 @@ def manager_update_employee(employee_id):
     if error_response is not None:
         return error_response
 
-    employee = db.session.get(Employee, employee_id)
-    if employee is None:
-        return jsonify({"status": "employee_not_found"}), 404
-
-    payload = request.get_json(silent=True) or {}
-    employee_code = normalize_text(payload.get("employee_code"))
-    full_name = normalize_text(payload.get("full_name"))
-    department = normalize_text(payload.get("department")) or "Văn phòng"
-    position = normalize_text(payload.get("position")) or "Nhân viên"
-
-    if not employee_code or not full_name:
-        return invalid_request("employee_code and full_name are required")
-
-    existing_employee = Employee.query.filter(
-        Employee.employee_code == employee_code,
-        Employee.id != employee.id,
-    ).first()
-    if existing_employee is not None:
-        return jsonify({"status": "duplicate_employee_code"}), 409
-
-    employee.employee_code = employee_code
-    employee.full_name = full_name
-    employee.department = department
-    employee.position = position
-    employee.is_active = bool(payload.get("is_active", employee.is_active))
-
-    try:
-        db.session.commit()
-    except IntegrityError:
-        db.session.rollback()
-        code_conflict = Employee.query.filter_by(employee_code=employee_code).first()
-        if code_conflict is not None and code_conflict.id != employee.id:
-            return jsonify({"status": "duplicate_employee_code"}), 409
-        raise
-
-    return jsonify({"employee": serialize_employee(employee)})
+    employee_service = get_service("employee_service")
+    result = employee_service.update_employee(employee_id, request.get_json(silent=True) or {})
+    return jsonify(result.payload), result.http_status
 
 
 @manager_bp.delete("/manager/employees/<int:employee_id>")
@@ -185,27 +121,9 @@ def manager_delete_employee(employee_id):
     if error_response is not None:
         return error_response
 
-    employee = db.session.get(Employee, employee_id)
-    if employee is None:
-        return jsonify({"status": "employee_not_found"}), 404
-
-    # --- Cascade cleanup (DB side via cascade relationships) ---
-    # Delete face-related records and files first (outside transaction for file I/O)
-    deleted_face_samples = _delete_face_samples_for_employee(employee.id)
-
-    # --- Hard-delete the employee (cascade deletes FaceSample, FaceEmbedding, AttendanceEvent) ---
-    deleted_attendance_count = AttendanceEvent.query.filter_by(employee_id=employee.id).count()
-    db.session.delete(employee)
-    db.session.commit()
-
-    return jsonify(
-        {
-            "status": "deleted",
-            "employee_id": employee.id,
-            "deleted_face_samples": len(deleted_face_samples),
-            "deleted_attendance_events": deleted_attendance_count,
-        }
-    )
+    employee_service = get_service("employee_service")
+    result = employee_service.delete_employee(employee_id)
+    return jsonify(result.payload), result.http_status
 
 
 @manager_bp.get("/manager/attendance")

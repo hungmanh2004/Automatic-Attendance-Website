@@ -40,7 +40,8 @@
 - **Redis** cho session store, rate limiting, và RediSearch vector index.
 - Magic numbers configurable qua `Config` (giờ điểm danh, số mẫu face, batch frame limits, similarity threshold, rate limit).
 - Bare `except` blocks đã được thay bằng logging.
-- `delete_employee_samples()` đã dùng `SCAN`; riêng `FaceIndexService.refresh()` vẫn dùng `KEYS` khi rebuild full index.
+- Redis face-index cleanup dùng incremental scan: `delete_employee_samples()` dùng `SCAN`, còn `FaceIndexService.refresh()` dùng `scan_iter(match="face:*", count=500)` khi rebuild full index.
+- `FaceIndexService` nhận `VectorStore` adapter qua constructor; production mặc định dùng `RedisVectorStore`, còn tests/dev có thể truyền fake hoặc in-memory store.
 
 ## Kiến trúc tổng quan
 
@@ -55,10 +56,12 @@ Browser (React)
   └── ReportsPage      →  /api/manager/dashboard + /api/manager/attendance
 
 Backend (Flask)
+  ├── bootstrap.py     → schema update helper for app startup
   ├── embedding.py      → YOLOv12 + InsightFace BuffaloL
   ├── face_alignment.py → cv2.warpAffine (eye-based rotation)
   ├── redis_vector_store.py → RediSearch FLAT index, cosine KNN
-  ├── face_index.py     → FaceIndexService (wrapper)
+  ├── in_memory_vector_store.py → test/dev VectorStore adapter
+  ├── face_index.py     → FaceIndexService (VectorStore-backed wrapper)
   ├── attendance.py     → AttendanceService (dashboard + records)
   └── face_batch_enrollment.py → quality scoring, deduplication
 
@@ -78,6 +81,7 @@ Storage
 |-- backend/
 |   |-- app/
 |   |   |-- __init__.py            App factory + service wiring
+|   |   |-- bootstrap.py           Startup bootstrap helpers (schema updates)
 |   |   |-- config.py              Config (all magic numbers here)
 |   |   |-- extensions.py          SQLAlchemy db instance
 |   |   |-- models.py              5 SQLAlchemy models
@@ -92,8 +96,9 @@ Storage
 |   |       |-- embedding.py        YOLO + InsightFace pipeline
 |   |       |-- face_alignment.py   cv2 eye-based face alignment
 |   |       |-- face_batch_enrollment.py  Batch scoring & selection
-|   |       |-- face_index.py       FaceIndexService (Redis wrapper)
+|   |       |-- face_index.py       FaceIndexService (VectorStore-backed wrapper)
 |   |       |-- redis_vector_store.py  RediSearch vector store
+|   |       |-- in_memory_vector_store.py  Test/dev VectorStore adapter
 |   |       |-- vector_store.py    Abstract VectorStore interface
 |   |       |-- recognition.py      Guest recognition orchestrator
 |   |       |-- attendance.py       Attendance records & dashboard
@@ -136,7 +141,9 @@ Storage
 |   `-- vite.config.js
 |-- scripts/
 |   |-- create_manager.py
-|   `-- migrate_redis_vector.py
+|   |-- migrate_redis_vector.py
+|   `-- dev/
+|       `-- build_db_benchmark.py
 |-- docs/
 |   |-- Improvement Plan/
 |   |-- Project Codebase/
@@ -145,6 +152,14 @@ Storage
 |-- run-local.ps1
 `-- .env.example
 ```
+
+### Backend bootstrap
+- `backend/app/__init__.py` owns the Flask app factory orchestration: resolve paths, configure storage, initialize Redis/session/database, wire services, and register blueprints.
+- `backend/app/bootstrap.py` owns startup schema patches such as adding/backfilling legacy `employees.department` and `employees.position` columns.
+- `EmbeddingService.prewarm()` is the public startup hook for loading InsightFace early; app factory code should call this method instead of private lazy-load helpers.
+- `FACE_MATCH_THRESHOLD` is read from `Config` and passed into `FaceIndexService` during service construction, so recognition threshold changes should be made in config/env rather than inside the service.
+- `FaceIndexService` depends on the abstract `VectorStore` port by constructor injection; production falls back to `RedisVectorStore`, while tests/dev can pass `InMemoryVectorStore` or another fake adapter without touching Redis.
+- New startup migration or bootstrap helpers should go into `bootstrap.py`; keep `create_app()` focused on orchestration and dependency wiring.
 
 ## Biến môi trường
 
@@ -214,6 +229,15 @@ docker compose exec backend python scripts/create_manager.py --username admin --
 ```
 
 Script sẽ in `exists:<username>` nếu tài khoản đã tồn tại.
+
+Các script backend import qua package chuẩn `backend.app...`, vì vậy nên chạy từ repo root hoặc trong container backend có repo root trên `PYTHONPATH`:
+
+```powershell
+python scripts/create_manager.py --username admin --password abc123
+python scripts/migrate_redis_vector.py
+```
+
+`scripts/dev/build_db_benchmark.py` là utility benchmark dataset, không phải runtime dependency.
 
 ## Chạy local không dùng Docker
 

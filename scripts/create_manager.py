@@ -6,22 +6,16 @@ from werkzeug.security import generate_password_hash
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-for candidate in (REPO_ROOT, REPO_ROOT / "backend"):
-    candidate_str = str(candidate)
-    if candidate_str not in sys.path:
-        sys.path.insert(0, candidate_str)
+repo_root_str = str(REPO_ROOT)
+if repo_root_str not in sys.path:
+    sys.path.insert(0, repo_root_str)
+
+from backend.app import create_app
+from backend.app.extensions import db
+from backend.app.models import ManagerUser
 
 
 def load_app_context():
-    try:
-        from backend.app import create_app
-        from backend.app.extensions import db
-        from backend.app.models import ManagerUser
-    except ModuleNotFoundError:
-        from app import create_app
-        from extensions import db
-        from models import ManagerUser
-
     return create_app, db, ManagerUser
 
 

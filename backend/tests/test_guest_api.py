@@ -1,5 +1,4 @@
 import importlib
-import importlib.util
 import sys
 import types
 from datetime import datetime
@@ -59,9 +58,6 @@ def test_guest_checkin_returns_payload_from_recognition_service(app, client):
 
 def test_embedding_service_defers_insightface_import_until_extraction(monkeypatch):
     module_name = "backend.app.services.embedding"
-    if importlib.util.find_spec(module_name) is None:
-        module_name = "app.services.embedding"
-
     sys.modules.pop(module_name, None)
 
     attempted_imports = []
@@ -128,15 +124,12 @@ def test_embedding_service_uses_yolo_and_insightface(monkeypatch, tmp_path):
             h, w = img.shape[:2]
             return [FakeDetectionResult(h, w)]
 
-    # Create a small valid image (50x50 so crop is non-empty)
-    test_img = np.random.randint(0, 255, (50, 50, 3), dtype=np.uint8)
+    # Create a valid image large enough to pass face-quality filtering.
+    test_img = np.random.randint(0, 255, (160, 160, 3), dtype=np.uint8)
     _, jpeg_bytes = cv2.imencode(".jpg", test_img)
     frame_bytes = jpeg_bytes.tobytes()
 
-    try:
-        from backend.app.services import embedding as embedding_mod
-    except ModuleNotFoundError:
-        from app.services import embedding as embedding_mod
+    from backend.app.services import embedding as embedding_mod
 
     service = embedding_mod.EmbeddingService()
     # Inject fake YOLO model directly (skip lazy-load)
@@ -145,16 +138,13 @@ def test_embedding_service_uses_yolo_and_insightface(monkeypatch, tmp_path):
 
     embeddings = service.extract_embeddings(frame_bytes)
 
-    assert embeddings == [[0.1, 0.2, 0.3]]
+    assert np.allclose(embeddings, [[0.1, 0.2, 0.3]])
     assert captured["img_type"] == "ndarray"
     assert captured["img_shape"] == (112, 112, 3)
 
 
 def test_storage_service_saves_guest_frame_under_dated_subdirectory(tmp_path, monkeypatch):
-    try:
-        from backend.app.services import storage as storage_module
-    except ModuleNotFoundError:
-        from app.services import storage as storage_module
+    from backend.app.services import storage as storage_module
 
     class FixedDateTime:
         @classmethod
@@ -171,72 +161,114 @@ def test_storage_service_saves_guest_frame_under_dated_subdirectory(tmp_path, mo
     assert snapshot_path.read_bytes() == b"frame-bytes"
 
 
-def test_face_index_service_uses_cosine_distance_for_thresholding(monkeypatch):
-    try:
-        from backend.app.services.face_index import FaceIndexService
-    except ModuleNotFoundError:
-        from app.services.face_index import FaceIndexService
+def test_face_index_service_delegates_match_to_store_with_threshold():
+    from backend.app.services.face_index import FaceIndexService
 
-    service = FaceIndexService(threshold=0.01)
-    monkeypatch.setattr(
-        service,
-        "refresh",
-        lambda: service._entries.__setitem__(
-            slice(None),
-            [
-                {
-                    "employee_id": 7,
-                    "employee_code": "EMP-007",
-                    "full_name": "Ada Lovelace",
-                    "embedding": [1.0, 0.0],
-                }
-            ],
-        ),
-    )
+    class FakeStore:
+        def __init__(self):
+            self.calls = []
 
-    match = service.find_match([10.0, 0.0])
+        def find_best_match(self, embedding, threshold):
+            self.calls.append((embedding, threshold))
+            return {"employee_id": 7, "distance": 0.0}
+
+    service = FaceIndexService(threshold=0.42)
+    fake_store = FakeStore()
+    service._store = fake_store
+
+    match = service.find_match([1.0, 0.0])
 
     assert match is not None
     assert match["employee_id"] == 7
-    assert match["distance"] == 0.0
+    assert fake_store.calls == [([1.0, 0.0], 0.42)]
 
 
-def test_face_index_service_refreshes_on_each_find_match(monkeypatch):
-    try:
-        from backend.app.services.face_index import FaceIndexService
-    except ModuleNotFoundError:
-        from app.services.face_index import FaceIndexService
+def test_face_index_service_accepts_vector_store_adapter():
+    from backend.app.services.face_index import FaceIndexService
 
-    service = FaceIndexService(threshold=0.01)
-    refresh_calls = {"count": 0}
+    class FakeStore:
+        def __init__(self):
+            self.setup_calls = 0
 
-    def fake_refresh():
-        refresh_calls["count"] += 1
-        employee_id = refresh_calls["count"]
-        service._entries = [
-            {
-                "employee_id": employee_id,
-                "employee_code": f"EMP-{employee_id:03d}",
-                "full_name": f"Employee {employee_id}",
-                "embedding": [1.0, 0.0],
-            }
-        ]
+        def setup_index(self):
+            self.setup_calls += 1
 
-    monkeypatch.setattr(service, "refresh", fake_refresh)
+    fake_store = FakeStore()
 
-    first_match = service.find_match([1.0, 0.0])
-    second_match = service.find_match([1.0, 0.0])
+    service = FaceIndexService(fake_store, threshold=0.31)
+    service.setup()
 
-    assert first_match["employee_id"] == 1
-    assert second_match["employee_id"] == 2
-    assert refresh_calls["count"] == 2
+    assert service.threshold == 0.31
+    assert service._store is fake_store
+    assert fake_store.setup_calls == 1
+
+
+def test_face_index_service_refresh_rebuilds_store_from_database(app, fake_redis):
+    from backend.app.extensions import db
+    from backend.app.models import Employee, FaceSample
+    from backend.app.services.face_index import FaceIndexService
+
+    scan_calls = []
+
+    def forbidden_keys(pattern):
+        raise AssertionError("refresh should use scan_iter instead of keys")
+
+    def scan_iter(*, match=None, count=100):
+        scan_calls.append({"match": match, "count": count})
+        return iter(["face:stale"])
+
+    fake_redis.keys = forbidden_keys
+    fake_redis.scan_iter = scan_iter
+
+    class FakeStore:
+        def __init__(self):
+            self.upserts = []
+
+        def upsert_face_sample(self, employee_id, sample_index, employee_code, full_name, embedding):
+            self.upserts.append(
+                {
+                    "employee_id": employee_id,
+                    "sample_index": sample_index,
+                    "employee_code": employee_code,
+                    "full_name": full_name,
+                    "embedding": embedding,
+                }
+            )
+
+    service = FaceIndexService(threshold=0.42)
+    fake_store = FakeStore()
+    service._store = fake_store
+
+    with app.app_context():
+        employee = Employee(employee_code="EMP-007", full_name="Ada Lovelace")
+        db.session.add(employee)
+        db.session.flush()
+        db.session.add(
+            FaceSample(
+                employee_id=employee.id,
+                sample_index=1,
+                image_path="sample.jpg",
+                embedding_json="[1.0, 0.0]",
+            )
+        )
+        db.session.commit()
+
+        service.refresh()
+
+    assert scan_calls == [{"match": "face:*", "count": 500}]
+    assert fake_store.upserts == [
+        {
+            "employee_id": employee.id,
+            "sample_index": 1,
+            "employee_code": "EMP-007",
+            "full_name": "Ada Lovelace",
+            "embedding": [1.0, 0.0],
+        }
+    ]
 
 
 def test_recognition_service_returns_no_face_when_embedding_list_is_empty():
-    try:
-        from backend.app.services.recognition import RecognitionService
-    except ModuleNotFoundError:
-        from app.services.recognition import RecognitionService
+    from backend.app.services.recognition import RecognitionService
 
     class FakeEmbeddingService:
         def extract_embeddings(self, frame_bytes):
@@ -259,10 +291,7 @@ def test_recognition_service_returns_no_face_when_embedding_list_is_empty():
 
 
 def test_recognition_service_returns_multiple_faces_when_more_than_one_embedding():
-    try:
-        from backend.app.services.recognition import RecognitionService
-    except ModuleNotFoundError:
-        from app.services.recognition import RecognitionService
+    from backend.app.services.recognition import RecognitionService
 
     class FakeEmbeddingService:
         def extract_embeddings(self, frame_bytes):
@@ -285,10 +314,7 @@ def test_recognition_service_returns_multiple_faces_when_more_than_one_embedding
 
 
 def test_recognition_service_cleans_orphan_snapshot_and_reuses_existing_event_metadata(tmp_path):
-    try:
-        from backend.app.services.recognition import RecognitionService
-    except ModuleNotFoundError:
-        from app.services.recognition import RecognitionService
+    from backend.app.services.recognition import RecognitionService
 
     existing_snapshot_path = tmp_path / "persisted.jpg"
     existing_snapshot_path.write_bytes(b"persisted")
@@ -336,10 +362,7 @@ def test_recognition_service_cleans_orphan_snapshot_and_reuses_existing_event_me
 
 
 def test_attendance_service_returns_existing_event_after_integrity_error(monkeypatch):
-    try:
-        from backend.app.services import attendance as attendance_module
-    except ModuleNotFoundError:
-        from app.services import attendance as attendance_module
+    from backend.app.services import attendance as attendance_module
 
     class FixedDateTime:
         @classmethod
