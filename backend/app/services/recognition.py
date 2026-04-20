@@ -1,3 +1,4 @@
+from flask import url_for
 from pathlib import Path
 
 
@@ -17,7 +18,8 @@ class RecognitionService:
             "full_name": match["full_name"],
             "distance": match["distance"],
             "checked_in_at": event.checked_in_at.isoformat(),
-            "snapshot_path": event.snapshot_path,
+            "snapshot_path": event.snapshot_path,  # keep for backward compat
+            "snapshot_url": url_for("manager.manager_attendance_snapshot", attendance_id=event.id),
         }
 
     def process_guest_image(self, frame_bytes, filename=None, content_type=None):
