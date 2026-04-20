@@ -91,6 +91,8 @@ export default function AttendancePage() {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, per_page: 50, total: 0, pages: 1 });
 
   useEffect(() => {
     let cancelled = false;
@@ -116,6 +118,10 @@ export default function AttendancePage() {
   }, [location.pathname, navigate, setUnauthenticated]);
 
   useEffect(() => {
+    setCurrentPage(1);
+  }, [filters.from, filters.to, filters.search, filters.department, filters.position, filters.status]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadAttendance() {
@@ -129,9 +135,17 @@ export default function AttendancePage() {
           search: filters.search,
           department: filters.department === "all" ? "" : filters.department,
           position: filters.position === "all" ? "" : filters.position,
+          page: currentPage,
+          per_page: 50,
         });
         if (cancelled) return;
         setRecords(payload.records || []);
+        setPagination({
+          page: payload.pagination?.page ?? currentPage,
+          per_page: payload.pagination?.per_page ?? 50,
+          total: payload.pagination?.total ?? 0,
+          pages: payload.pagination?.pages ?? 1,
+        });
       } catch (caughtError) {
         if (caughtError?.status === 401) {
           setUnauthenticated();
@@ -150,7 +164,7 @@ export default function AttendancePage() {
     return () => {
       cancelled = true;
     };
-  }, [filters, location.pathname, navigate, setUnauthenticated]);
+  }, [filters, location.pathname, navigate, setUnauthenticated, currentPage]);
 
   function applyPeriod(nextPeriod) {
     const range = nextPeriod === "weekly" ? getWeekRange() : nextPeriod === "monthly" ? getMonthRange() : getTodayRange();
@@ -178,6 +192,73 @@ export default function AttendancePage() {
   const filteredRecords = useMemo(() => {
     return records.filter((record) => filters.status === "all" || getStatusValue(record) === filters.status);
   }, [filters.status, records]);
+
+  const tableContent = useMemo(() => {
+    if (filteredRecords.length === 0) {
+      return (
+        <div className="empty-state">
+          <h3>Không có bản ghi phù hợp</h3>
+          <p>Thử thay đổi bộ lọc thời gian, phòng ban, chức vụ hoặc từ khóa tìm kiếm.</p>
+        </div>
+      );
+    }
+    return (
+      <>
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Nhân viên</th>
+                <th>Phòng ban</th>
+                <th>Chức vụ</th>
+                <th>Thời gian</th>
+                <th>Trạng thái</th>
+                <th>Độ khớp</th>
+                <th>Địa điểm</th>
+                <th>Ảnh chụp</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRecords.map((record) => (
+                <tr key={record.id}>
+                  <td>
+                    <strong>{record.full_name}</strong>
+                    <div className="text-secondary">{record.employee_code}</div>
+                  </td>
+                  <td>{record.department || "Văn phòng"}</td>
+                  <td>{record.position || "Nhân viên"}</td>
+                  <td>{new Date(record.checked_in_at).toLocaleString()}</td>
+                  <td>
+                    <span className={`badge ${getStatusValue(record) === "late" ? "badge-warning" : "badge-success"}`}>{getStatus(record)}</span>
+                  </td>
+                  <td>{getConfidence(record)}</td>
+                  <td>Cổng chính</td>
+                  <td>
+                    <a className="btn btn-ghost btn-sm" href={record.snapshot_url} target="_blank" rel="noreferrer">
+                      Xem ảnh
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {pagination.pages > 1 && (
+          <div className="pagination-controls" style={{ display: "flex", gap: "1rem", alignItems: "center", marginTop: "1rem", justifyContent: "flex-end" }}>
+            <button type="button" className="btn btn-secondary" disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)}>
+              ← Trước
+            </button>
+            <span>
+              Trang {currentPage} / {pagination.pages}
+            </span>
+            <button type="button" className="btn btn-secondary" disabled={currentPage >= pagination.pages} onClick={() => setCurrentPage((p) => p + 1)}>
+              Sau →
+            </button>
+          </div>
+        )}
+      </>
+    );
+  }, [currentPage, filteredRecords, pagination.pages]);
 
   return (
     <div className="page-shell">
@@ -264,54 +345,7 @@ export default function AttendancePage() {
           Đang tải dữ liệu chấm công...
         </div>
       ) : (
-        <section className="glass-panel attendance-table-wrap">
-          {filteredRecords.length === 0 ? (
-            <div className="empty-state">
-              <h3>Không có bản ghi phù hợp</h3>
-              <p>Thử thay đổi bộ lọc thời gian, phòng ban, chức vụ hoặc từ khóa tìm kiếm.</p>
-            </div>
-          ) : (
-            <div className="table-scroll">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Nhân viên</th>
-                    <th>Phòng ban</th>
-                    <th>Chức vụ</th>
-                    <th>Thời gian</th>
-                    <th>Trạng thái</th>
-                    <th>Độ khớp</th>
-                    <th>Địa điểm</th>
-                    <th>Ảnh chụp</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredRecords.map((record) => (
-                    <tr key={record.id}>
-                      <td>
-                        <strong>{record.full_name}</strong>
-                        <div className="text-secondary">{record.employee_code}</div>
-                      </td>
-                      <td>{record.department || "Văn phòng"}</td>
-                      <td>{record.position || "Nhân viên"}</td>
-                      <td>{new Date(record.checked_in_at).toLocaleString()}</td>
-                      <td>
-                        <span className={`badge ${getStatusValue(record) === "late" ? "badge-warning" : "badge-success"}`}>{getStatus(record)}</span>
-                      </td>
-                      <td>{getConfidence(record)}</td>
-                      <td>Cổng chính</td>
-                      <td>
-                        <a className="btn btn-ghost btn-sm" href={record.snapshot_url} target="_blank" rel="noreferrer">
-                          Xem ảnh
-                        </a>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+        <section className="glass-panel attendance-table-wrap">{tableContent}</section>
       )}
     </div>
   );
