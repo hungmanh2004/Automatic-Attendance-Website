@@ -352,7 +352,7 @@ export async function cropFace(videoEl, detection, paddingRatio = 0.4) {
 
   // Chuyển canvas → JPEG blob
   const blob = await new Promise((resolve) => {
-    canvas.toBlob(resolve, 'image/jpeg', 0.92)
+    canvas.toBlob(resolve, 'image/jpeg', 0.85)
   })
 
   return { blob, localKeypoints, canvas }

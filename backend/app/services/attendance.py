@@ -36,10 +36,24 @@ def _derive_confidence(distance):
 
 
 class AttendanceService:
-    def record_checkin(self, employee_id, snapshot_path, distance=None, checked_in_at=None):
+    def get_today_event(self, employee_id, checked_in_at=None):
         checked_in_at = checked_in_at or datetime.now()
         checkin_date = checked_in_at.date().isoformat()
-        existing_event = _find_existing_event(employee_id, checkin_date)
+        return _find_existing_event(employee_id, checkin_date)
+
+    def record_checkin(
+        self,
+        employee_id,
+        snapshot_path,
+        distance=None,
+        checked_in_at=None,
+        skip_existing_lookup=False,
+    ):
+        checked_in_at = checked_in_at or datetime.now()
+        checkin_date = checked_in_at.date().isoformat()
+        existing_event = None
+        if not skip_existing_lookup:
+            existing_event = self.get_today_event(employee_id, checked_in_at=checked_in_at)
 
         if existing_event is not None:
             return existing_event, False

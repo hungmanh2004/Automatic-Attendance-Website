@@ -3,6 +3,7 @@ import sys
 
 from pathlib import Path
 
+import numpy as np
 from flask import Flask
 from flask_session import Session
 from sqlalchemy import inspect, text
@@ -15,6 +16,7 @@ from .routes.face_enrollment import face_enrollment_bp
 from .routes.guest import guest_bp
 from .routes.health import health_bp
 from .services.attendance import AttendanceService
+from .celery_app import create_celery
 from .services.embedding import EmbeddingService
 from .services.face_index import FaceIndexService
 from .services.recognition import RecognitionService
@@ -81,8 +83,13 @@ def _initialize_services(app):
     # Pre-warm InsightFace model at startup so first request is fast
     embedding_logger = logging.getLogger(__name__)
     embedding_logger.info("Pre-warming InsightFace model...")
-    _ = embedding_service._get_insightface_recognizer()
-    embedding_logger.info("InsightFace model ready.")
+    recognizer = embedding_service._get_insightface_recognizer()
+    try:
+        dummy_face = np.zeros((112, 112, 3), dtype=np.uint8)
+        recognizer.get_feat(dummy_face)
+        embedding_logger.info("InsightFace model ready (including first inference warmup).")
+    except Exception:
+        embedding_logger.warning("InsightFace first-inference warmup failed, will warm on first request.", exc_info=True)
     face_index_service = FaceIndexService()
     face_index_service.setup()
     attendance_service = AttendanceService()
@@ -106,6 +113,10 @@ def _initialize_redis(app):
     app.config["SESSION_REDIS"] = redis_client
 
 
+def _initialize_celery(app):
+    app.extensions["celery"] = create_celery(app)
+
+
 def create_app(test_config=None):
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -126,6 +137,7 @@ def create_app(test_config=None):
     Session(app)
     _initialize_database(app)
     _initialize_services(app)
+    _initialize_celery(app)
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(guest_bp, url_prefix="/api")
     app.register_blueprint(manager_bp, url_prefix="/api")

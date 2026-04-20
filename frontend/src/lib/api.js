@@ -165,7 +165,7 @@ export function enrollEmployeeFacesBatch(employeeId, payloadOrFrames = [], legac
     formData.append('frames', frame.blob, `frame-${index + 1}.${extension}`)
   })
 
-  if (normalizedFrames.length < 20) {
+  if (normalizedFrames.length < 5) {
     throw new ApiError('Chưa thu đủ khung hình để gửi lên máy chủ.', {
       payload: { frame_count: normalizedFrames.length, status: 'insufficient_frames' },
       status: 400,

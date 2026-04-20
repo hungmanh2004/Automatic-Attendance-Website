@@ -149,10 +149,10 @@ def _build_batch_response(employee, prepared_samples, batch_result, prepared_emb
 
 def _build_capture_config():
     return {
-        "min_frames": current_app.config.get("FACE_BATCH_MIN_FRAMES", 20),
-        "max_frames": current_app.config.get("FACE_BATCH_MAX_FRAMES", 30),
+        "min_frames": current_app.config.get("FACE_BATCH_MIN_FRAMES", 8),
+        "max_frames": current_app.config.get("FACE_BATCH_MAX_FRAMES", 12),
         "thumbnail_limit": 10,
-        "min_capture_gap_ms": 700,
+        "min_capture_gap_ms": current_app.config.get("FACE_CAPTURE_MIN_GAP_MS", 300),
     }
 
 
@@ -328,8 +328,8 @@ def manager_employee_face_enrollment_batch(employee_id):
             return invalid_request("all frames must be JPEG, PNG, BMP, or WebP images")
 
     metadata = request.form.get("metadata")
-    min_frames = current_app.config.get("FACE_BATCH_MIN_FRAMES", 20)
-    max_frames = current_app.config.get("FACE_BATCH_MAX_FRAMES", 30)
+    min_frames = current_app.config.get("FACE_BATCH_MIN_FRAMES", 8)
+    max_frames = current_app.config.get("FACE_BATCH_MAX_FRAMES", 12)
     batch_service = FaceBatchEnrollmentService(
         get_service("embedding_service"),
         min_frames=min_frames,

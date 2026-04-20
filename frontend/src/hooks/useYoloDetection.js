@@ -11,24 +11,25 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  loadModel,
-  isModelLoaded,
-  detectFaces,
   cropFace,
+  detectFaces,
+  isModelLoaded,
+  loadModel,
 } from '../lib/yoloOnnxService'
-import { submitGuestCheckinKpts } from '../lib/guestApi'
+import { submitGuestCheckinKpts, waitGuestCheckinTaskResult } from '../lib/guestApi'
 import { getFriendlyBackendErrorMessage } from '../lib/errorMessages'
 
 // ============================================================
 // Cấu hình State Machine
 // ============================================================
-const STABLE_FRAMES_REQUIRED = 5  // Số frame liên tục phải ổn định
-const MIN_FACE_AREA_RATIO = 0.04  // Tối thiểu 4% diện tích video
-const MIN_CONFIDENCE = 0.5        // Ngưỡng tin tưởng tối thiểu
-const COOLDOWN_MS = 3000          // Thời gian chờ sau khi nhận diện
+const STABLE_FRAMES_REQUIRED = 2  // Giảm yêu cầu đứng yên lâu trước khi gửi nhận diện
+const MIN_FACE_AREA_RATIO = 0.025 // Cho phép mặt nhỏ hơn một chút để bắt nhanh hơn
+const MIN_CONFIDENCE = 0.4        // Nới ngưỡng confidence để nhận diện sớm hơn
+const COOLDOWN_MS = 1500          // Giảm thời gian chờ giữa các lần nhận diện
 const MAX_RETRIES = 3             // Số lần thử lại cho unknown
-const TRACK_LOST_FRAMES = 15      // Mất track sau N frame liên tục
+const TRACK_LOST_FRAMES = 30      // Giữ track lâu hơn để task async kịp trả kết quả
 const DETECTION_INTERVAL_MS = 100 // Chạy detect mỗi 100ms (~10fps YOLO)
+const DEBUG_DETECTION = false
 
 /**
  * Tính khoảng cách Euclidean giữa 2 tâm box.
@@ -109,7 +110,12 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
   const handleRecognitionResult = useCallback((trackId, payload) => {
     const tracks = tracksRef.current
     const track = tracks.get(trackId)
-    if (!track) return
+    if (!track) {
+      // Task async có thể hoàn tất sau khi track đã mất do người dùng di chuyển.
+      // Vẫn phát kết quả để UI cập nhật check-in thay vì bỏ qua.
+      setLastResult({ ...payload, trackId })
+      return
+    }
 
     if (payload.status === 'recognized' || payload.status === 'already_checked_in') {
       track.state = 'recognized'
@@ -155,7 +161,12 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
         cropResult.blob,
         cropResult.localKeypoints,
       )
-      handleRecognitionResult(trackId, payload)
+      if (payload?.status === 'queued' && payload?.task_id) {
+        const resolvedPayload = await waitGuestCheckinTaskResult(payload.task_id)
+        handleRecognitionResult(trackId, resolvedPayload)
+      } else {
+        handleRecognitionResult(trackId, payload)
+      }
     } catch (error) {
       handleRecognitionResult(trackId, {
         status: 'network_error',
@@ -244,23 +255,31 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
       const bh = det.box.y2 - det.box.y1
       const faceArea = bw * bh
       if (faceArea / frameArea < MIN_FACE_AREA_RATIO) {
-        console.warn(`[Track#${id}] SKIP: faceArea ${(faceArea/frameArea).toFixed(4)} < min ${MIN_FACE_AREA_RATIO}`)
+        if (DEBUG_DETECTION) {
+          console.warn(`[Track#${id}] SKIP: faceArea ${(faceArea/frameArea).toFixed(4)} < min ${MIN_FACE_AREA_RATIO}`)
+        }
         continue
       }
 
       // Kiểm tra confidence
       if (det.score < MIN_CONFIDENCE) {
-        console.warn(`[Track#${id}] SKIP: score ${det.score.toFixed(3)} < min ${MIN_CONFIDENCE}`)
+        if (DEBUG_DETECTION) {
+          console.warn(`[Track#${id}] SKIP: score ${det.score.toFixed(3)} < min ${MIN_CONFIDENCE}`)
+        }
         continue
       }
 
       // Kiểm tra stable frames
       if (track.stableFrames < STABLE_FRAMES_REQUIRED) {
-        console.warn(`[Track#${id}] SKIP: stableFrames ${track.stableFrames} < required ${STABLE_FRAMES_REQUIRED}`)
+        if (DEBUG_DETECTION) {
+          console.warn(`[Track#${id}] SKIP: stableFrames ${track.stableFrames} < required ${STABLE_FRAMES_REQUIRED}`)
+        }
         continue
       }
 
-      console.warn(`[Track#${id}] TRIGGER → backend (score=${det.score.toFixed(3)}, areaRatio=${(faceArea/frameArea).toFixed(4)})`)
+      if (DEBUG_DETECTION) {
+        console.warn(`[Track#${id}] TRIGGER → backend (score=${det.score.toFixed(3)}, areaRatio=${(faceArea/frameArea).toFixed(4)})`)
+      }
       // ĐỦ ĐIỀU KIỆN → Gửi crop!
       track.cooldownUntil = Date.now() + COOLDOWN_MS
       sendCropToBackend(id, videoEl, det)
@@ -290,7 +309,7 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
         if (videoEl && videoEl.readyState >= 2 && workCanvasRef.current) {
           try {
             const dets = await detectFaces(videoEl, workCanvasRef.current)
-            if (dets.length > 0) {
+            if (DEBUG_DETECTION && dets.length > 0) {
               console.warn(`[detectFaces] ✓ ${dets.length} face(s) detected`)
             }
             setDetections(dets)
@@ -327,6 +346,9 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
       })
     }
     if (result.length > 0) {
+      if (!DEBUG_DETECTION) {
+        return result
+      }
       console.warn(`[tracks] ${result.length} track(s):`, result.map(t => `#${t.id} state=${t.state} box=(${t.box?.x1?.toFixed(0)},${t.box?.y1?.toFixed(0)}) score=${t.score.toFixed(3)}`))
     }
     return result

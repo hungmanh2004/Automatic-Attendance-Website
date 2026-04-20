@@ -52,7 +52,7 @@ class FaceBatchEnrollmentService:
                 rejected.append({"frame_index": zero_based_index + 1, "reason": "empty_frame"})
                 continue
 
-            embeddings = self.embedding_service.extract_embeddings(frame_bytes)
+            embeddings = self._extract_embeddings_from_candidate(frame_bytes)
             if len(embeddings) == 0:
                 rejected.append({"frame_index": zero_based_index + 1, "reason": "no_face"})
                 continue
@@ -99,6 +99,17 @@ class FaceBatchEnrollmentService:
             "selected_frame_count": len(selected_frames),
             "rejected_frames": rejected,
         }
+
+    def _extract_embeddings_from_candidate(self, frame_bytes):
+        # Frames in batch enrollment are already face crops from frontend.
+        # Prefer crop-only embedding path to skip backend YOLO detection per frame.
+        crop_extractor = getattr(self.embedding_service, "extract_embeddings_from_crop", None)
+        if callable(crop_extractor):
+            vector = crop_extractor(frame_bytes, None)
+            if vector is None:
+                return []
+            return [vector]
+        return self.embedding_service.extract_embeddings(frame_bytes)
 
     def _extract_frame_hints(self, metadata, frame_count):
         if metadata is None:
