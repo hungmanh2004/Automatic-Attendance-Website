@@ -36,11 +36,15 @@ def _make_service(app, embedding_service, face_index_service):
 def test_build_capture_config_returns_batch_capture_defaults(app):
     service = _make_service(app, embedding_service=None, face_index_service=None)
 
-    assert service.build_capture_config(min_frames=24, max_frames=32) == {
-        "min_frames": 24,
-        "max_frames": 32,
+    assert service.build_capture_config(
+        min_frames=8,
+        max_frames=12,
+        min_capture_gap_ms=300,
+    ) == {
+        "min_frames": 8,
+        "max_frames": 12,
         "thumbnail_limit": 10,
-        "min_capture_gap_ms": 700,
+        "min_capture_gap_ms": 300,
     }
 
 

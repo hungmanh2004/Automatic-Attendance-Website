@@ -17,6 +17,26 @@ def test_app_wires_face_index_threshold_from_config(tmp_path):
     assert app.extensions["face_index_service"].threshold == 0.37
 
 
+def test_app_wires_celery_extension_with_config(tmp_path):
+    from backend.app import create_app
+
+    app = create_app(
+        {
+            "TESTING": True,
+            "APP_DB_PATH": tmp_path / "app.db",
+            "CHECKIN_DIR": tmp_path / "checkins",
+            "FACES_DIR": tmp_path / "faces",
+            "CELERY_TASK_ALWAYS_EAGER": True,
+            "CELERY_TASK_EAGER_PROPAGATES": True,
+        }
+    )
+
+    celery_app = app.extensions["celery"]
+
+    assert celery_app.conf.task_always_eager is True
+    assert celery_app.conf.task_eager_propagates is True
+
+
 def test_health_endpoint_returns_ok(client):
     response = client.get("/api/health")
 

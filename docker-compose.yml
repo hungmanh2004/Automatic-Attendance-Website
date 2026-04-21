@@ -25,6 +25,25 @@ services:
     ports:
       - "5000:5000"
 
+  celery_worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: celery -A backend.celery_worker:celery_app worker --loglevel=info --concurrency=2
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-local-dev-only-change-this}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379}
+    volumes:
+      - ./backend:/app/backend
+      - ./scripts:/app/scripts
+    depends_on:
+      - redis
+
   frontend:
     build:
       context: ./frontend

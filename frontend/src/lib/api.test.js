@@ -33,9 +33,9 @@ describe("apiRequest", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const frames = Array.from({ length: 20 }, (_, index) => ({
+    const frames = Array.from({ length: 8 }, (_, index) => ({
       blob: new Blob([`frame-${index}`], { type: "image/jpeg" }),
-      capturedAtMs: index * 725,
+      capturedAtMs: index * 325,
       detectorScore: 0.72 + index * 0.001,
       blurScore: 28 + index,
       hintPose: index % 2 === 0 ? "left" : "right",
@@ -48,7 +48,7 @@ describe("apiRequest", () => {
     expect(path).toBe("/api/manager/employees/5/face-enrollment/batch");
     expect(options.method).toBe("POST");
     expect(options.body).toBeInstanceOf(FormData);
-    expect(options.body.getAll("frames")).toHaveLength(20);
+    expect(options.body.getAll("frames")).toHaveLength(8);
 
     const metadata = JSON.parse(options.body.get("metadata"));
     expect(metadata.source).toBe("scanner_capture");
@@ -62,13 +62,13 @@ describe("apiRequest", () => {
     });
   });
 
-  it("rejects client-side when fewer than 20 frame objects are provided", async () => {
+  it("rejects client-side when fewer than 8 frame objects are provided", async () => {
     expect(() =>
       enrollEmployeeFacesBatch(
         5,
-        Array.from({ length: 19 }, (_, index) => ({
+        Array.from({ length: 7 }, (_, index) => ({
           blob: new Blob([`frame-${index}`], { type: "image/jpeg" }),
-          capturedAtMs: index * 700,
+          capturedAtMs: index * 300,
           detectorScore: 0.8,
           blurScore: 30,
           hintPose: "front",

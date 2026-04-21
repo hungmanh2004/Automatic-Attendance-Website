@@ -98,10 +98,10 @@ class RedisVectorStore(VectorStore):
         query_vec = np.array(embedding, dtype=np.float32).tobytes()
 
         q = (
-            Query("*=>[KNN 5 @embedding $vec AS score]")
+            Query("*=>[KNN 1 @embedding $vec AS score]")
             .sort_by("score")
             .return_fields("employee_id", "employee_code", "full_name", "score")
-            .paging(0, 5)
+            .paging(0, 1)
             .dialect(2)
         )
 

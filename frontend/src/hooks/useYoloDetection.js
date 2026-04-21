@@ -16,7 +16,7 @@ import {
   detectFaces,
   cropFace,
 } from '../lib/yoloOnnxService'
-import { submitGuestCheckinKpts } from '../lib/guestApi'
+import { submitGuestCheckinKpts, waitGuestCheckinTaskResult } from '../lib/guestApi'
 import { getFriendlyBackendErrorMessage } from '../lib/errorMessages'
 
 // ============================================================
@@ -109,7 +109,10 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
   const handleRecognitionResult = useCallback((trackId, payload) => {
     const tracks = tracksRef.current
     const track = tracks.get(trackId)
-    if (!track) return
+    if (!track) {
+      setLastResult({ ...payload, trackId })
+      return
+    }
 
     if (payload.status === 'recognized' || payload.status === 'already_checked_in') {
       track.state = 'recognized'
@@ -155,7 +158,12 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
         cropResult.blob,
         cropResult.localKeypoints,
       )
-      handleRecognitionResult(trackId, payload)
+      if (payload?.status === 'queued' && payload?.task_id) {
+        const resolvedPayload = await waitGuestCheckinTaskResult(payload.task_id)
+        handleRecognitionResult(trackId, resolvedPayload)
+      } else {
+        handleRecognitionResult(trackId, payload)
+      }
     } catch (error) {
       handleRecognitionResult(trackId, {
         status: 'network_error',

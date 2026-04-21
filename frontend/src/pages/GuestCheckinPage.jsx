@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 import { useGuestCamera } from "../hooks/useGuestCamera";
 import { useYoloDetection } from "../hooks/useYoloDetection";
-import { submitGuestCheckinKpts } from "../lib/guestApi";
+import { submitGuestCheckinKpts, waitGuestCheckinTaskResult } from "../lib/guestApi";
 import { getFriendlyBackendErrorMessage, getGuestResultCopy } from "../lib/errorMessages";
 import "./GuestCheckinPage.css";
 
@@ -235,7 +235,11 @@ export default function GuestCheckinPage() {
 
     setSubmissionState("loading");
     try {
-      const payload = await submitGuestCheckinKpts(manualFile, null);
+      const queuedPayload = await submitGuestCheckinKpts(manualFile, null);
+      const payload =
+        queuedPayload?.status === "queued" && queuedPayload?.task_id
+          ? await waitGuestCheckinTaskResult(queuedPayload.task_id)
+          : queuedPayload;
       setResult(payload);
       if (payload?.status === "recognized") {
         pushHistory(payload);

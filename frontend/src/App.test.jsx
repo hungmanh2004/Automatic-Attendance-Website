@@ -14,9 +14,19 @@ vi.mock("./hooks/useGuestCamera", () => ({
   }),
 }));
 
+vi.mock("./hooks/useYoloDetection", () => ({
+  useYoloDetection: () => ({
+    getTracksSnapshot: vi.fn(() => []),
+    lastResult: null,
+    modelProgress: 0,
+    modelState: "ready",
+  }),
+}));
+
 vi.mock("./lib/guestApi", () => ({
   captureGuestFrame: vi.fn(),
   submitGuestCheckin: vi.fn(),
+  waitGuestCheckinTaskResult: vi.fn(),
 }));
 
 describe("App routing", () => {
@@ -28,6 +38,6 @@ describe("App routing", () => {
     );
 
     expect(screen.getByRole("heading", { name: /điểm danh khuôn mặt thông minh/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /dừng quét/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /camera lỗi\? tải ảnh thủ công/i })).toBeInTheDocument();
   });
 });

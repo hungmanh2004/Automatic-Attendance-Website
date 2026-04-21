@@ -56,6 +56,136 @@ def test_guest_checkin_returns_payload_from_recognition_service(app, client):
     ]
 
 
+def test_guest_crop_task_decodes_payload_and_calls_recognition_service(app):
+    import base64
+
+    calls = []
+
+    class FakeRecognitionService:
+        def process_crop_image(self, crop_bytes, keypoints_list, filename=None):
+            calls.append(
+                {
+                    "crop_bytes": crop_bytes,
+                    "keypoints_list": keypoints_list,
+                    "filename": filename,
+                }
+            )
+            return {"status": "recognized", "employee_id": 7}
+
+    app.extensions["recognition_service"] = FakeRecognitionService()
+    celery_app = app.extensions["celery"]
+
+    result = celery_app.tasks["guest.process_crop_checkin"].apply(
+        kwargs={
+            "crop_b64": base64.b64encode(b"crop-bytes").decode("ascii"),
+            "keypoints_list": [1, 2, 3, 4],
+            "filename": "face-crop.jpg",
+        }
+    )
+
+    assert result.get() == {"status": "recognized", "employee_id": 7}
+    assert calls == [
+        {
+            "crop_bytes": b"crop-bytes",
+            "keypoints_list": [1, 2, 3, 4],
+            "filename": "face-crop.jpg",
+        }
+    ]
+
+
+def test_guest_crop_task_rejects_invalid_base64(app):
+    celery_app = app.extensions["celery"]
+
+    result = celery_app.tasks["guest.process_crop_checkin"].apply(
+        kwargs={
+            "crop_b64": "not-base64",
+            "keypoints_list": None,
+            "filename": "face-crop.jpg",
+        }
+    )
+
+    assert result.get() == {
+        "status": "invalid_request",
+        "message": "invalid crop payload",
+    }
+
+
+def test_guest_checkin_kpts_enqueues_task(app, client):
+    import base64
+
+    class FakeTaskHandle:
+        id = "task-123"
+
+    class FakeTask:
+        def __init__(self):
+            self.calls = []
+
+        def delay(self, **kwargs):
+            self.calls.append(kwargs)
+            return FakeTaskHandle()
+
+    fake_task = FakeTask()
+    app.extensions["celery"].tasks["guest.process_crop_checkin"] = fake_task
+
+    response = client.post(
+        "/api/guest/checkin-kpts",
+        data={
+            "crop": (BytesIO(b"x" * 2048), "face.jpg"),
+            "kpts": "[1, 2, 3, 4]",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 202
+    assert response.get_json() == {"status": "queued", "task_id": "task-123"}
+    queued = fake_task.calls[0]
+    assert base64.b64decode(queued["crop_b64"]) == b"x" * 2048
+    assert queued["keypoints_list"] == [1, 2, 3, 4]
+    assert queued["filename"] == "face.jpg"
+
+
+def test_guest_checkin_kpts_task_result_completed(app, client):
+    class FakeResult:
+        state = "SUCCESS"
+        result = {"status": "recognized", "employee_id": 7}
+
+        def forget(self):
+            self.forgot = True
+
+    class FakeCelery:
+        def AsyncResult(self, task_id):
+            assert task_id == "task-123"
+            return FakeResult()
+
+    app.extensions["celery"] = FakeCelery()
+
+    response = client.get("/api/guest/checkin-kpts/tasks/task-123")
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "status": "completed",
+        "task_state": "SUCCESS",
+        "result": {"status": "recognized", "employee_id": 7},
+    }
+
+
+def test_guest_checkin_kpts_task_result_processing(app, client):
+    class FakeResult:
+        state = "STARTED"
+
+    class FakeCelery:
+        def AsyncResult(self, task_id):
+            assert task_id == "task-123"
+            return FakeResult()
+
+    app.extensions["celery"] = FakeCelery()
+
+    response = client.get("/api/guest/checkin-kpts/tasks/task-123")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "processing", "task_state": "STARTED"}
+
+
 def test_embedding_service_defers_insightface_import_until_extraction(monkeypatch):
     module_name = "backend.app.services.embedding"
     sys.modules.pop(module_name, None)
@@ -267,6 +397,51 @@ def test_face_index_service_refresh_rebuilds_store_from_database(app, fake_redis
     ]
 
 
+def test_redis_vector_store_uses_single_nearest_neighbor(monkeypatch):
+    from backend.app.services import redis_vector_store
+
+    captured = {}
+
+    class FakeQuery:
+        def __init__(self, query_text):
+            captured["query_text"] = query_text
+
+        def sort_by(self, field):
+            captured["sort_by"] = field
+            return self
+
+        def return_fields(self, *fields):
+            captured["return_fields"] = fields
+            return self
+
+        def paging(self, offset, count):
+            captured["paging"] = (offset, count)
+            return self
+
+        def dialect(self, value):
+            captured["dialect"] = value
+            return self
+
+    class FakeIndex:
+        def search(self, query, query_params=None):
+            captured["query_params"] = query_params
+            return types.SimpleNamespace(docs=[])
+
+    class FakeRedis:
+        def ft(self, index_name):
+            captured["index_name"] = index_name
+            return FakeIndex()
+
+    monkeypatch.setattr(redis_vector_store, "Query", FakeQuery)
+    monkeypatch.setattr(redis_vector_store, "get_redis", lambda: FakeRedis())
+
+    result = redis_vector_store.RedisVectorStore().find_best_match([0.1, 0.2], threshold=0.6)
+
+    assert result is None
+    assert captured["query_text"] == "*=>[KNN 1 @embedding $vec AS score]"
+    assert captured["paging"] == (0, 1)
+
+
 def test_recognition_service_returns_no_face_when_embedding_list_is_empty():
     from backend.app.services.recognition import RecognitionService
 
@@ -368,6 +543,110 @@ def test_recognition_service_cleans_orphan_snapshot_and_reuses_existing_event_me
     assert payload["snapshot_url"] == "/api/manager/attendance/42/snapshot"
     assert payload["checked_in_at"] == existing_event.checked_in_at.isoformat()
     assert orphan_snapshot_path.exists() is False
+
+
+def test_attendance_service_get_today_event_uses_checked_in_date(monkeypatch):
+    from datetime import datetime
+    from backend.app.services import attendance as attendance_module
+
+    calls = []
+    existing_event = types.SimpleNamespace(employee_id=7, checkin_date="2026-04-21")
+
+    def fake_find_existing_event(employee_id, checkin_date):
+        calls.append((employee_id, checkin_date))
+        return existing_event
+
+    monkeypatch.setattr(attendance_module, "_find_existing_event", fake_find_existing_event)
+
+    result = attendance_module.AttendanceService().get_today_event(
+        7,
+        checked_in_at=datetime(2026, 4, 21, 9, 0, 0),
+    )
+
+    assert result is existing_event
+    assert calls == [(7, "2026-04-21")]
+
+
+def test_attendance_service_can_skip_initial_existing_lookup(monkeypatch):
+    from datetime import datetime
+    from backend.app.services import attendance as attendance_module
+
+    find_calls = []
+    added_events = []
+
+    def fake_find_existing_event(employee_id, checkin_date):
+        find_calls.append((employee_id, checkin_date))
+        return None
+
+    monkeypatch.setattr(attendance_module, "_find_existing_event", fake_find_existing_event)
+    monkeypatch.setattr(attendance_module.db.session, "add", lambda event: added_events.append(event))
+    monkeypatch.setattr(attendance_module.db.session, "commit", lambda: None)
+
+    event, created = attendance_module.AttendanceService().record_checkin(
+        employee_id=7,
+        snapshot_path="new.jpg",
+        distance=0.12,
+        checked_in_at=datetime(2026, 4, 21, 9, 0, 0),
+        skip_existing_lookup=True,
+    )
+
+    assert created is True
+    assert event is added_events[0]
+    assert find_calls == []
+
+
+def test_recognition_crop_checkin_reuses_existing_event_before_saving_snapshot(monkeypatch):
+    from backend.app.services.recognition import RecognitionService
+
+    existing_event = types.SimpleNamespace(
+        id=42,
+        checked_in_at=datetime(2026, 4, 21, 9, 15, 0),
+        snapshot_path="persisted.jpg",
+    )
+
+    class FakeStorageService:
+        def save_guest_frame(self, frame_bytes, filename=None):
+            raise AssertionError("snapshot should not be saved for same-day duplicate crop checkin")
+
+    class FakeEmbeddingService:
+        def extract_embeddings_from_crop(self, crop_bytes, keypoints_list):
+            return [0.1, 0.2, 0.3]
+
+    class FakeFaceIndexService:
+        def find_match(self, embedding):
+            return {
+                "employee_id": 7,
+                "employee_code": "EMP-007",
+                "full_name": "Ada Lovelace",
+                "distance": 0.12,
+            }
+
+    class FakeAttendanceService:
+        def get_today_event(self, employee_id):
+            assert employee_id == 7
+            return existing_event
+
+        def record_checkin(self, **kwargs):
+            raise AssertionError("record_checkin should not run when existing event is found")
+
+    def fake_url_for(endpoint, **values):
+        assert endpoint == "manager.manager_attendance_snapshot"
+        return f"/api/manager/attendance/{values['attendance_id']}/snapshot"
+
+    monkeypatch.setattr("backend.app.services.recognition.url_for", fake_url_for)
+
+    service = RecognitionService(
+        storage_service=FakeStorageService(),
+        embedding_service=FakeEmbeddingService(),
+        face_index_service=FakeFaceIndexService(),
+        attendance_service=FakeAttendanceService(),
+    )
+
+    payload = service.process_crop_image(b"crop-bytes", [1, 2, 3, 4], filename="face.jpg")
+
+    assert payload["status"] == "already_checked_in"
+    assert payload["snapshot_path"] == "persisted.jpg"
+    assert payload["snapshot_url"] == "/api/manager/attendance/42/snapshot"
 
 
 def test_attendance_service_returns_existing_event_after_integrity_error(monkeypatch):

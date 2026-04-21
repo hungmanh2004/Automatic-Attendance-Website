@@ -69,12 +69,12 @@ class FaceEnrollmentService:
     def face_index_service(self):
         return _resolve_service(self._face_index_service)
 
-    def build_capture_config(self, *, min_frames: int, max_frames: int) -> dict:
+    def build_capture_config(self, *, min_frames: int, max_frames: int, min_capture_gap_ms: int) -> dict:
         return {
             "min_frames": min_frames,
             "max_frames": max_frames,
             "thumbnail_limit": 10,
-            "min_capture_gap_ms": 700,
+            "min_capture_gap_ms": min_capture_gap_ms,
         }
 
     def enroll_static(self, employee, images, *, expected_sample_count: int) -> FaceEnrollmentResult:
