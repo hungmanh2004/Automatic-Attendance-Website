@@ -3,7 +3,7 @@
 Ứng dụng web điểm danh bằng khuôn mặt với 2 luồng chính:
 
 - **Guest**: Nhân viên/khách mở trang `/guest` để quét khuôn mặt bằng camera trình duyệt (YOLO ONNX chạy trong browser) hoặc gửi ảnh đã crop.
-- **Manager**: Đăng nhập tại `/manager` để quản lý nhân viên, đăng ký mẫu khuôn mặt (upload tĩnh 5 ảnh hoặc scanner goal-based batch 20-30 frames), và xem báo cáo điểm danh.
+- **Manager**: Đăng nhập tại `/manager` để quản lý nhân viên, đăng ký mẫu khuôn mặt (upload tĩnh 5 ảnh hoặc scanner goal-based batch 8-12 frames), và xem báo cáo điểm danh.
 
 ## Tính năng hiện tại
 
@@ -16,7 +16,7 @@
 
 ### Face enrollment
 - **5-ảnh static**: Upload đúng 5 ảnh tĩnh để tạo bộ mẫu operational.
-- **Batch (20-30 frames)**: Tự động chọn frame đẹp nhất, scoring theo blur/brightness/pose, deduplicate by cosine distance.
+- **Batch (8-12 frames)**: Tự động chọn frame đẹp nhất, scoring theo blur/brightness/pose, deduplicate by cosine distance.
 - Validation client-side: `no_face`, `multiple_faces`, `insufficient_frames`.
 - Redis index được sync ngay sau khi enrollment thành công.
 
@@ -38,6 +38,7 @@
 ### Backend
 - **Flask 3** app factory, SQLAlchemy ORM, SQLite local.
 - **Redis** cho session store, rate limiting, và RediSearch vector index.
+- **Celery** xử lý async crop recognition cho `/api/guest/checkin-kpts`; frontend poll `/api/guest/checkin-kpts/tasks/<task_id>` để lấy kết quả.
 - Magic numbers configurable qua `Config` (giờ điểm danh, số mẫu face, batch frame limits, similarity threshold, rate limit).
 - Bare `except` blocks đã được thay bằng logging.
 - Redis face-index cleanup dùng incremental scan: `delete_employee_samples()` dùng `SCAN`, còn `FaceIndexService.refresh()` dùng `scan_iter(match="face:*", count=500)` khi rebuild full index.
@@ -168,6 +169,11 @@ Storage
 ```env
 SECRET_KEY=change-me-to-a-random-string
 REDIS_URL=redis://localhost:6379
+CELERY_BROKER_URL=redis://localhost:6379
+CELERY_RESULT_BACKEND=redis://localhost:6379
+FACE_BATCH_MIN_FRAMES=8
+FACE_BATCH_MAX_FRAMES=12
+FACE_CAPTURE_MIN_GAP_MS=300
 ```
 
 ### Frontend `.env` (nếu không dùng Docker)
@@ -198,6 +204,26 @@ Sau khi chạy:
 - **Backend health**: `http://localhost:5000/api/health`
 
 Lần chạy đầu tiên có thể chậm do cài dependency và tải YOLO/InsightFace model.
+
+### Async Guest Check-In Worker
+
+The `/api/guest/checkin-kpts` endpoint enqueues crop recognition work in Celery and returns a task id. The frontend polls `/api/guest/checkin-kpts/tasks/<task_id>` until the task completes.
+
+Run the Flask API and worker together with Docker Compose:
+
+```powershell
+docker compose up --build backend celery_worker redis
+```
+
+Local environment variables:
+
+```text
+CELERY_BROKER_URL=redis://localhost:6379
+CELERY_RESULT_BACKEND=redis://localhost:6379
+FACE_BATCH_MIN_FRAMES=8
+FACE_BATCH_MAX_FRAMES=12
+FACE_CAPTURE_MIN_GAP_MS=300
+```
 
 ### Khi nào cần rebuild
 

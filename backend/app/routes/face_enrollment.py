@@ -31,8 +31,9 @@ def manager_employee_face_samples(employee_id):
     )
     face_enrollment_service = get_service("face_enrollment_service")
     capture_config = face_enrollment_service.build_capture_config(
-        min_frames=current_app.config.get("FACE_BATCH_MIN_FRAMES", 20),
-        max_frames=current_app.config.get("FACE_BATCH_MAX_FRAMES", 30),
+        min_frames=current_app.config.get("FACE_BATCH_MIN_FRAMES", 8),
+        max_frames=current_app.config.get("FACE_BATCH_MAX_FRAMES", 12),
+        min_capture_gap_ms=current_app.config.get("FACE_CAPTURE_MIN_GAP_MS", 300),
     )
     return jsonify(
         {
@@ -99,8 +100,8 @@ def manager_employee_face_enrollment_batch(employee_id):
 
     frames = request.files.getlist("frames")
     metadata = request.form.get("metadata")
-    min_frames = current_app.config.get("FACE_BATCH_MIN_FRAMES", 20)
-    max_frames = current_app.config.get("FACE_BATCH_MAX_FRAMES", 30)
+    min_frames = current_app.config.get("FACE_BATCH_MIN_FRAMES", 8)
+    max_frames = current_app.config.get("FACE_BATCH_MAX_FRAMES", 12)
     face_enrollment_service = get_service("face_enrollment_service")
     result = face_enrollment_service.enroll_batch(
         employee,

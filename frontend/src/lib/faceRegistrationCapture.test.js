@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCaptureFeedback,
   computeBlurScore,
+  DEFAULT_CAPTURE_CONFIG,
   evaluateFrameQuality,
   mirrorHintPose,
   normalizeCaptureConfig,
@@ -31,17 +32,32 @@ function createDetection({
 }
 
 describe("faceRegistrationCapture", () => {
+  it("uses faster capture defaults for batch enrollment", () => {
+    expect(DEFAULT_CAPTURE_CONFIG).toEqual({
+      minFrames: 8,
+      maxFrames: 12,
+      thumbnailLimit: 10,
+      minCaptureGapMs: 300,
+    });
+    expect(normalizeCaptureConfig({})).toEqual({
+      minFrames: 8,
+      maxFrames: 12,
+      thumbnailLimit: 10,
+      minCaptureGapMs: 300,
+    });
+  });
+
   it("normalizes capture config from backend shape", () => {
     expect(normalizeCaptureConfig({
-      min_frames: 20,
-      max_frames: 30,
+      min_frames: 8,
+      max_frames: 12,
       thumbnail_limit: 10,
-      min_capture_gap_ms: 700,
+      min_capture_gap_ms: 300,
     })).toEqual({
-      minFrames: 20,
-      maxFrames: 30,
+      minFrames: 8,
+      maxFrames: 12,
       thumbnailLimit: 10,
-      minCaptureGapMs: 700,
+      minCaptureGapMs: 300,
     });
   });
 

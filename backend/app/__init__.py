@@ -7,6 +7,7 @@ from flask import Flask
 from flask_session import Session
 
 from .bootstrap import run_schema_updates
+from .celery_app import create_celery
 from .config import Config
 from .extensions import db
 from .routes.manager import manager_bp
@@ -102,6 +103,10 @@ def _initialize_redis(app):
     app.config["SESSION_REDIS"] = redis_client
 
 
+def _initialize_celery(app):
+    app.extensions["celery"] = create_celery(app)
+
+
 def create_app(test_config=None):
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -122,6 +127,7 @@ def create_app(test_config=None):
     Session(app)
     _initialize_database(app)
     _initialize_services(app)
+    _initialize_celery(app)
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(guest_bp, url_prefix="/api")
     app.register_blueprint(manager_bp, url_prefix="/api")
