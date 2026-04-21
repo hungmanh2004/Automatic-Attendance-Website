@@ -30,8 +30,9 @@ class Config:
 
     # Face enrollment
     FACE_SAMPLES_PER_ENROLLMENT = 5
-    FACE_BATCH_MIN_FRAMES = 20
-    FACE_BATCH_MAX_FRAMES = 30
+    FACE_BATCH_MIN_FRAMES = int(os.getenv("FACE_BATCH_MIN_FRAMES", "8"))
+    FACE_BATCH_MAX_FRAMES = int(os.getenv("FACE_BATCH_MAX_FRAMES", "12"))
+    FACE_CAPTURE_MIN_GAP_MS = int(os.getenv("FACE_CAPTURE_MIN_GAP_MS", "300"))
 
     # Recognition
     FACE_MATCH_THRESHOLD = 0.6
