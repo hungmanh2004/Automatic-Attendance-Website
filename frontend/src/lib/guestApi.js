@@ -1,4 +1,4 @@
-import { apiRequest } from './api'
+import { ApiError, apiRequest } from './api'
 
 export function createGuestFrameFormData(frameFile) {
   const formData = new FormData()
@@ -31,6 +31,44 @@ export async function submitGuestCheckinKpts(cropBlob, localKeypoints) {
   return apiRequest('/api/guest/checkin-kpts', {
     body: formData,
     method: 'POST',
+  })
+}
+
+export async function fetchGuestCheckinTask(taskId) {
+  return apiRequest(`/api/guest/checkin-kpts/tasks/${taskId}`, {
+    method: 'GET',
+  })
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export async function waitGuestCheckinTaskResult(
+  taskId,
+  { timeoutMs = 7000, intervalMs = 150 } = {},
+) {
+  const deadlineMs = Date.now() + timeoutMs
+
+  while (Date.now() < deadlineMs) {
+    const payload = await fetchGuestCheckinTask(taskId)
+    if (payload?.status === 'completed') {
+      return payload.result || { status: 'unknown' }
+    }
+
+    if (payload?.status === 'failed') {
+      throw new ApiError(payload.message || 'Face processing failed', {
+        payload,
+        status: 500,
+      })
+    }
+
+    await sleep(intervalMs)
+  }
+
+  throw new ApiError('Face processing timeout', {
+    payload: { status: 'processing_timeout', task_id: taskId },
+    status: 408,
   })
 }
 
