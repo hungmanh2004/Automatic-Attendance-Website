@@ -397,6 +397,51 @@ def test_face_index_service_refresh_rebuilds_store_from_database(app, fake_redis
     ]
 
 
+def test_redis_vector_store_uses_single_nearest_neighbor(monkeypatch):
+    from backend.app.services import redis_vector_store
+
+    captured = {}
+
+    class FakeQuery:
+        def __init__(self, query_text):
+            captured["query_text"] = query_text
+
+        def sort_by(self, field):
+            captured["sort_by"] = field
+            return self
+
+        def return_fields(self, *fields):
+            captured["return_fields"] = fields
+            return self
+
+        def paging(self, offset, count):
+            captured["paging"] = (offset, count)
+            return self
+
+        def dialect(self, value):
+            captured["dialect"] = value
+            return self
+
+    class FakeIndex:
+        def search(self, query, query_params=None):
+            captured["query_params"] = query_params
+            return types.SimpleNamespace(docs=[])
+
+    class FakeRedis:
+        def ft(self, index_name):
+            captured["index_name"] = index_name
+            return FakeIndex()
+
+    monkeypatch.setattr(redis_vector_store, "Query", FakeQuery)
+    monkeypatch.setattr(redis_vector_store, "get_redis", lambda: FakeRedis())
+
+    result = redis_vector_store.RedisVectorStore().find_best_match([0.1, 0.2], threshold=0.6)
+
+    assert result is None
+    assert captured["query_text"] == "*=>[KNN 1 @embedding $vec AS score]"
+    assert captured["paging"] == (0, 1)
+
+
 def test_recognition_service_returns_no_face_when_embedding_list_is_empty():
     from backend.app.services.recognition import RecognitionService
 
