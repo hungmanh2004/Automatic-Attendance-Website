@@ -1,15 +1,15 @@
 export const DEFAULT_CAPTURE_CONFIG = Object.freeze({
-  minFrames: 20,
-  maxFrames: 30,
+  minFrames: 8,
+  maxFrames: 12,
   thumbnailLimit: 10,
-  minCaptureGapMs: 700,
+  minCaptureGapMs: 300,
 })
 
-export const CAPTURE_LOOP_INTERVAL_MS = 150
+export const CAPTURE_LOOP_INTERVAL_MS = 100
 export const CAPTURE_SOFT_WARNING_MS = 15000
-export const MIN_DETECTOR_SCORE = 0.65
+export const MIN_DETECTOR_SCORE = 0.55
 export const MIN_FACE_AREA_RATIO = 0.035
-export const MIN_BLUR_SCORE = 18
+export const MIN_BLUR_SCORE = 14
 
 export function normalizeCaptureConfig(config = {}) {
   return {
