@@ -110,6 +110,82 @@ def test_guest_crop_task_rejects_invalid_base64(app):
     }
 
 
+def test_guest_checkin_kpts_enqueues_task(app, client):
+    import base64
+
+    class FakeTaskHandle:
+        id = "task-123"
+
+    class FakeTask:
+        def __init__(self):
+            self.calls = []
+
+        def delay(self, **kwargs):
+            self.calls.append(kwargs)
+            return FakeTaskHandle()
+
+    fake_task = FakeTask()
+    app.extensions["celery"].tasks["guest.process_crop_checkin"] = fake_task
+
+    response = client.post(
+        "/api/guest/checkin-kpts",
+        data={
+            "crop": (BytesIO(b"x" * 2048), "face.jpg"),
+            "kpts": "[1, 2, 3, 4]",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 202
+    assert response.get_json() == {"status": "queued", "task_id": "task-123"}
+    queued = fake_task.calls[0]
+    assert base64.b64decode(queued["crop_b64"]) == b"x" * 2048
+    assert queued["keypoints_list"] == [1, 2, 3, 4]
+    assert queued["filename"] == "face.jpg"
+
+
+def test_guest_checkin_kpts_task_result_completed(app, client):
+    class FakeResult:
+        state = "SUCCESS"
+        result = {"status": "recognized", "employee_id": 7}
+
+        def forget(self):
+            self.forgot = True
+
+    class FakeCelery:
+        def AsyncResult(self, task_id):
+            assert task_id == "task-123"
+            return FakeResult()
+
+    app.extensions["celery"] = FakeCelery()
+
+    response = client.get("/api/guest/checkin-kpts/tasks/task-123")
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "status": "completed",
+        "task_state": "SUCCESS",
+        "result": {"status": "recognized", "employee_id": 7},
+    }
+
+
+def test_guest_checkin_kpts_task_result_processing(app, client):
+    class FakeResult:
+        state = "STARTED"
+
+    class FakeCelery:
+        def AsyncResult(self, task_id):
+            assert task_id == "task-123"
+            return FakeResult()
+
+    app.extensions["celery"] = FakeCelery()
+
+    response = client.get("/api/guest/checkin-kpts/tasks/task-123")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "processing", "task_state": "STARTED"}
+
+
 def test_embedding_service_defers_insightface_import_until_extraction(monkeypatch):
     module_name = "backend.app.services.embedding"
     sys.modules.pop(module_name, None)
