@@ -184,7 +184,13 @@ class EmbeddingService:
     # Public API – giữ nguyên signature cũ để không phá code gọi bên ngoài
     # ------------------------------------------------------------------
     def prewarm(self) -> None:
-        self._get_insightface_recognizer()
+        recognizer = self._get_insightface_recognizer()
+        try:
+            dummy_face = np.zeros((112, 112, 3), dtype=np.uint8)
+            recognizer.get_feat(dummy_face)
+            logger.info("InsightFace first-inference warmup completed.")
+        except Exception:
+            logger.warning("InsightFace first-inference warmup failed; first request will warm it.", exc_info=True)
 
     def extract_embeddings(self, frame_bytes):
         """Nhận raw bytes ảnh, trả về list các embedding vectors.
