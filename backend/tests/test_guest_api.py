@@ -500,6 +500,110 @@ def test_recognition_service_cleans_orphan_snapshot_and_reuses_existing_event_me
     assert orphan_snapshot_path.exists() is False
 
 
+def test_attendance_service_get_today_event_uses_checked_in_date(monkeypatch):
+    from datetime import datetime
+    from backend.app.services import attendance as attendance_module
+
+    calls = []
+    existing_event = types.SimpleNamespace(employee_id=7, checkin_date="2026-04-21")
+
+    def fake_find_existing_event(employee_id, checkin_date):
+        calls.append((employee_id, checkin_date))
+        return existing_event
+
+    monkeypatch.setattr(attendance_module, "_find_existing_event", fake_find_existing_event)
+
+    result = attendance_module.AttendanceService().get_today_event(
+        7,
+        checked_in_at=datetime(2026, 4, 21, 9, 0, 0),
+    )
+
+    assert result is existing_event
+    assert calls == [(7, "2026-04-21")]
+
+
+def test_attendance_service_can_skip_initial_existing_lookup(monkeypatch):
+    from datetime import datetime
+    from backend.app.services import attendance as attendance_module
+
+    find_calls = []
+    added_events = []
+
+    def fake_find_existing_event(employee_id, checkin_date):
+        find_calls.append((employee_id, checkin_date))
+        return None
+
+    monkeypatch.setattr(attendance_module, "_find_existing_event", fake_find_existing_event)
+    monkeypatch.setattr(attendance_module.db.session, "add", lambda event: added_events.append(event))
+    monkeypatch.setattr(attendance_module.db.session, "commit", lambda: None)
+
+    event, created = attendance_module.AttendanceService().record_checkin(
+        employee_id=7,
+        snapshot_path="new.jpg",
+        distance=0.12,
+        checked_in_at=datetime(2026, 4, 21, 9, 0, 0),
+        skip_existing_lookup=True,
+    )
+
+    assert created is True
+    assert event is added_events[0]
+    assert find_calls == []
+
+
+def test_recognition_crop_checkin_reuses_existing_event_before_saving_snapshot(monkeypatch):
+    from backend.app.services.recognition import RecognitionService
+
+    existing_event = types.SimpleNamespace(
+        id=42,
+        checked_in_at=datetime(2026, 4, 21, 9, 15, 0),
+        snapshot_path="persisted.jpg",
+    )
+
+    class FakeStorageService:
+        def save_guest_frame(self, frame_bytes, filename=None):
+            raise AssertionError("snapshot should not be saved for same-day duplicate crop checkin")
+
+    class FakeEmbeddingService:
+        def extract_embeddings_from_crop(self, crop_bytes, keypoints_list):
+            return [0.1, 0.2, 0.3]
+
+    class FakeFaceIndexService:
+        def find_match(self, embedding):
+            return {
+                "employee_id": 7,
+                "employee_code": "EMP-007",
+                "full_name": "Ada Lovelace",
+                "distance": 0.12,
+            }
+
+    class FakeAttendanceService:
+        def get_today_event(self, employee_id):
+            assert employee_id == 7
+            return existing_event
+
+        def record_checkin(self, **kwargs):
+            raise AssertionError("record_checkin should not run when existing event is found")
+
+    def fake_url_for(endpoint, **values):
+        assert endpoint == "manager.manager_attendance_snapshot"
+        return f"/api/manager/attendance/{values['attendance_id']}/snapshot"
+
+    monkeypatch.setattr("backend.app.services.recognition.url_for", fake_url_for)
+
+    service = RecognitionService(
+        storage_service=FakeStorageService(),
+        embedding_service=FakeEmbeddingService(),
+        face_index_service=FakeFaceIndexService(),
+        attendance_service=FakeAttendanceService(),
+    )
+
+    payload = service.process_crop_image(b"crop-bytes", [1, 2, 3, 4], filename="face.jpg")
+
+    assert payload["status"] == "already_checked_in"
+    assert payload["snapshot_path"] == "persisted.jpg"
+    assert payload["snapshot_url"] == "/api/manager/attendance/42/snapshot"
+
+
 def test_attendance_service_returns_existing_event_after_integrity_error(monkeypatch):
     from backend.app.services import attendance as attendance_module
 

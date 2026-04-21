@@ -74,6 +74,10 @@ class RecognitionService:
         if match is None:
             return {"status": "unknown"}
 
+        existing_event = self.attendance_service.get_today_event(match["employee_id"])
+        if existing_event is not None:
+            return self._build_response(existing_event, match, created=False)
+
         snapshot_path = self.storage_service.save_guest_frame(
             crop_bytes, filename=filename
         )
@@ -82,6 +86,7 @@ class RecognitionService:
             employee_id=match["employee_id"],
             snapshot_path=snapshot_path,
             distance=match["distance"],
+            skip_existing_lookup=True,
         )
         t5 = time.perf_counter()
         logging.getLogger(__name__).info(
