@@ -40,7 +40,7 @@ describe("Employee face management", () => {
 
     renderApp("/manager/employees/1/faces");
 
-    expect(await screen.findByRole("link", { name: /open face scanner/i })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /mở scanner khuôn mặt/i })).toBeInTheDocument();
   });
 
   it("requires exactly five files before enrollment", async () => {
@@ -52,7 +52,7 @@ describe("Employee face management", () => {
 
     renderApp("/manager/employees/1/faces");
 
-    await screen.findByRole("link", { name: /open face scanner/i });
+    await screen.findByRole("link", { name: /mở scanner khuôn mặt/i });
     await user.upload(document.getElementById("face-files"), [new File(["1"], "1.jpg", { type: "image/jpeg" })]);
     await user.click(document.querySelector('.employee-create-panel form button[type="submit"]'));
 
@@ -112,7 +112,7 @@ describe("Employee face management", () => {
 
     renderApp("/manager/employees/1/faces");
 
-    await screen.findByRole("link", { name: /open face scanner/i });
+    await screen.findByRole("link", { name: /mở scanner khuôn mặt/i });
     const replaceInput = document.querySelector('.face-slot input[type="file"]');
     await user.upload(replaceInput, new File(["updated"], "1.jpg", { type: "image/jpeg" }));
 
