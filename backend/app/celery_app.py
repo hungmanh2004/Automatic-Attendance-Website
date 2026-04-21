@@ -24,4 +24,8 @@ def create_celery(flask_app):
         task_time_limit=flask_app.config["CELERY_TASK_TIME_LIMIT"],
         task_track_started=True,
     )
+
+    from .tasks.guest_tasks import register_guest_tasks
+
+    register_guest_tasks(celery_app)
     return celery_app

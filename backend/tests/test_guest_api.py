@@ -56,6 +56,60 @@ def test_guest_checkin_returns_payload_from_recognition_service(app, client):
     ]
 
 
+def test_guest_crop_task_decodes_payload_and_calls_recognition_service(app):
+    import base64
+
+    calls = []
+
+    class FakeRecognitionService:
+        def process_crop_image(self, crop_bytes, keypoints_list, filename=None):
+            calls.append(
+                {
+                    "crop_bytes": crop_bytes,
+                    "keypoints_list": keypoints_list,
+                    "filename": filename,
+                }
+            )
+            return {"status": "recognized", "employee_id": 7}
+
+    app.extensions["recognition_service"] = FakeRecognitionService()
+    celery_app = app.extensions["celery"]
+
+    result = celery_app.tasks["guest.process_crop_checkin"].apply(
+        kwargs={
+            "crop_b64": base64.b64encode(b"crop-bytes").decode("ascii"),
+            "keypoints_list": [1, 2, 3, 4],
+            "filename": "face-crop.jpg",
+        }
+    )
+
+    assert result.get() == {"status": "recognized", "employee_id": 7}
+    assert calls == [
+        {
+            "crop_bytes": b"crop-bytes",
+            "keypoints_list": [1, 2, 3, 4],
+            "filename": "face-crop.jpg",
+        }
+    ]
+
+
+def test_guest_crop_task_rejects_invalid_base64(app):
+    celery_app = app.extensions["celery"]
+
+    result = celery_app.tasks["guest.process_crop_checkin"].apply(
+        kwargs={
+            "crop_b64": "not-base64",
+            "keypoints_list": None,
+            "filename": "face-crop.jpg",
+        }
+    )
+
+    assert result.get() == {
+        "status": "invalid_request",
+        "message": "invalid crop payload",
+    }
+
+
 def test_embedding_service_defers_insightface_import_until_extraction(monkeypatch):
     module_name = "backend.app.services.embedding"
     sys.modules.pop(module_name, None)
