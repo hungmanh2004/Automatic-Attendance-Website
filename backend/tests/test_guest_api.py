@@ -313,13 +313,14 @@ def test_recognition_service_returns_multiple_faces_when_more_than_one_embedding
     assert payload == {"status": "multiple_faces", "faces_detected": 2}
 
 
-def test_recognition_service_cleans_orphan_snapshot_and_reuses_existing_event_metadata(tmp_path):
+def test_recognition_service_cleans_orphan_snapshot_and_reuses_existing_event_metadata(tmp_path, monkeypatch):
     from backend.app.services.recognition import RecognitionService
 
     existing_snapshot_path = tmp_path / "persisted.jpg"
     existing_snapshot_path.write_bytes(b"persisted")
     orphan_snapshot_path = tmp_path / "orphan.jpg"
     existing_event = types.SimpleNamespace(
+        id=42,
         checked_in_at=datetime(2026, 4, 2, 9, 15, 0),
         snapshot_path=str(existing_snapshot_path),
     )
@@ -346,6 +347,13 @@ def test_recognition_service_cleans_orphan_snapshot_and_reuses_existing_event_me
         def record_checkin(self, employee_id, snapshot_path, distance=None, checked_in_at=None):
             return existing_event, False
 
+    def fake_url_for(endpoint, **values):
+        if endpoint == "manager.manager_attendance_snapshot":
+            return f"/api/manager/attendance/{values['attendance_id']}/snapshot"
+        raise AssertionError(f"unexpected endpoint: {endpoint}")
+
+    monkeypatch.setattr("backend.app.services.recognition.url_for", fake_url_for)
+
     service = RecognitionService(
         storage_service=FakeStorageService(),
         embedding_service=FakeEmbeddingService(),
@@ -357,6 +365,7 @@ def test_recognition_service_cleans_orphan_snapshot_and_reuses_existing_event_me
 
     assert payload["status"] == "already_checked_in"
     assert payload["snapshot_path"] == str(existing_snapshot_path)
+    assert payload["snapshot_url"] == "/api/manager/attendance/42/snapshot"
     assert payload["checked_in_at"] == existing_event.checked_in_at.isoformat()
     assert orphan_snapshot_path.exists() is False
 
@@ -413,3 +422,48 @@ def test_attendance_service_returns_existing_event_after_integrity_error(monkeyp
         (7, "2026-04-02"),
         (7, "2026-04-02"),
     ]
+
+
+def test_recognition_service_build_response_includes_snapshot_url(monkeypatch):
+    """Checkin response should include snapshot_url for image retrieval."""
+    from datetime import datetime
+    from backend.app.services.recognition import RecognitionService
+
+    event = types.SimpleNamespace(
+        id=42,
+        checked_in_at=datetime(2026, 4, 20, 8, 30, 0),
+        snapshot_path="data/checkins/2026-04-20/snapshot.jpg",
+    )
+    match = {
+        "employee_id": 7,
+        "employee_code": "EMP-007",
+        "full_name": "Ada Lovelace",
+        "distance": 0.12,
+    }
+
+    class FakeServices:
+        pass
+
+    def fake_url_for(endpoint, **values):
+        if endpoint == "manager.manager_attendance_snapshot":
+            return f"/api/manager/attendance/{values['attendance_id']}/snapshot"
+        raise AssertionError(f"unexpected endpoint: {endpoint}")
+
+    monkeypatch.setattr("backend.app.services.recognition.url_for", fake_url_for)
+
+    service = RecognitionService(
+        storage_service=FakeServices(),
+        embedding_service=FakeServices(),
+        face_index_service=FakeServices(),
+        attendance_service=FakeServices(),
+    )
+
+    result = service._build_response(event, match, created=True)
+
+    assert result["status"] == "recognized"
+    assert "snapshot_url" in result
+    assert result["snapshot_url"] == "/api/manager/attendance/42/snapshot"
+    assert "snapshot_path" in result  # backward compat preserved
+    assert result["snapshot_path"] == "data/checkins/2026-04-20/snapshot.jpg"
+    assert result["employee_id"] == 7
+    assert result["full_name"] == "Ada Lovelace"

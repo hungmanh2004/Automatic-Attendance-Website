@@ -85,11 +85,15 @@ export function fetchDashboardSummary() {
   return apiRequest('/api/manager/dashboard')
 }
 
-export function fetchEmployees() {
-  return apiRequest('/api/manager/employees')
+export function fetchEmployees(params = {}) {
+  const searchParams = new URLSearchParams();
+  if (params.department) searchParams.set('department', params.department);
+  if (params.position) searchParams.set('position', params.position);
+  const query = searchParams.toString();
+  return apiRequest(`/api/manager/employees${query ? '?' + query : ''}`);
 }
 
-export const getEmployees = fetchEmployees
+export const getEmployees = fetchEmployees;
 
 export function createEmployee(employeeOrCode, fullName, position) {
   const employee =

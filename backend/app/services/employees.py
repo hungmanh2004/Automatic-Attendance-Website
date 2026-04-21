@@ -25,8 +25,13 @@ class EmployeeService:
         self.db = db
         self.face_sample_service = face_sample_service
 
-    def list_employees(self) -> list:
-        employees = Employee.query.order_by(Employee.id.asc()).all()
+    def list_employees(self, department=None, position=None) -> list:
+        query = Employee.query
+        if department:
+            query = query.filter(Employee.department == department)
+        if position:
+            query = query.filter(Employee.position == position)
+        employees = query.order_by(Employee.id.asc()).all()
         return [serialize_employee(employee) for employee in employees]
 
     def create_employee(self, payload: dict) -> EmployeeServiceResult:

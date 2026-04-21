@@ -45,7 +45,13 @@ export default function EmployeeListPage() {
     setMessage("");
 
     try {
-      const [employeePayload, dashboardPayload] = await Promise.all([getEmployees(), fetchDashboardSummary()]);
+      const [employeePayload, dashboardPayload] = await Promise.all([
+        getEmployees({
+          department: department === "all" ? "" : department,
+          position: position === "all" ? "" : position,
+        }),
+        fetchDashboardSummary(),
+      ]);
       const statsById = new Map((dashboardPayload.employee_stats || []).map((item) => [item.id, item]));
       const merged = (employeePayload.employees || []).map((employee) => ({
         ...employee,
@@ -193,10 +199,9 @@ export default function EmployeeListPage() {
         !normalized ||
         employee.full_name?.toLowerCase().includes(normalized) ||
         employee.employee_code?.toLowerCase().includes(normalized);
-      const matchDepartment = department === "all" || (employee.department || "Văn phòng") === department;
-      return matchSearch && matchDepartment;
+      return matchSearch;  // department/position now filtered by backend
     });
-  }, [activeEmployees, department, search]);
+  }, [activeEmployees, search]);
 
   return (
     <div className="page-shell employee-shell">
