@@ -5,6 +5,7 @@ from ..services.rate_limiter import RateLimiter
 from .helpers import invalid_request
 
 import json
+import logging
 
 guest_bp = Blueprint("guest", __name__)
 
@@ -60,7 +61,13 @@ def guest_checkin_kpts():
         kpts: JSON string, mảng 10 số [x0,y0, x1,y1, ..., x4,y4]
               (tọa độ local trong ảnh crop).
     """
+    import time
+    t_received = time.time()
     if _get_rate_limiter().is_limited(request.remote_addr):
+        t_preprocess_done = time.time()
+        logging.getLogger(__name__).info(
+            f"[guest_checkin_kpts] rate_limit_delta: {(t_preprocess_done-t_received)*1000:.2f} ms"
+        )
         return jsonify({"status": "rate_limited", "message": "Too many requests. Please wait."}), 429
 
     # --- Validate crop image ---
@@ -92,12 +99,23 @@ def guest_checkin_kpts():
         except (json.JSONDecodeError, TypeError):
             return invalid_request("kpts must be valid JSON")
 
+    t_preprocess_done = time.time()
+    logging.getLogger(__name__).info(
+        f"[guest_checkin_kpts_PREPROCESS] delta: {(t_preprocess_done-t_received)*1000:.2f} ms"
+    )
+    logging.getLogger(__name__).warning("Test log guest_checkin_kpts")
     # --- Process ---
+    t_process_start = time.time()
     recognition_service = current_app.extensions["recognition_service"]
+
     payload = recognition_service.process_crop_image(
         crop_bytes,
         keypoints_list,
         filename=crop.filename,
+    )
+    t_process_done = time.time()
+    logging.getLogger(__name__).info(
+        f"[guest_checkin_kpts_PROCESS] delta: {(t_process_done - t_process_start)*1000:.2f} ms"
     )
 
     return jsonify(payload)

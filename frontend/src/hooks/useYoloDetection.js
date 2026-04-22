@@ -278,6 +278,8 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
 
     loopActiveRef.current = true
     let rafId = null
+    // Thêm biến ref để đo thời gian detect YOLO
+    const detectStartRef = { current: null }; /////
 
     const loop = async () => {
       if (!loopActiveRef.current) return
@@ -289,7 +291,10 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
         const videoEl = videoRef.current
         if (videoEl && videoEl.readyState >= 2 && workCanvasRef.current) {
           try {
+            detectStartRef.current = performance.now(); ////////
             const dets = await detectFaces(videoEl, workCanvasRef.current)
+            const detectEnd = performance.now();//////
+            console.log('[YOLO] detectFaces time:', (detectEnd - detectStartRef.current).toFixed(2), 'ms');
             if (dets.length > 0) {
               console.warn(`[detectFaces] ✓ ${dets.length} face(s) detected`)
             }
