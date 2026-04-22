@@ -45,12 +45,12 @@ function centroidDistance(boxA, boxB) {
  * Custom React Hook: Quản lý YOLO ONNX detection trên browser.
  *
  * @param {object} options
- * @param {React.RefObject<HTMLVideoElement>} options.videoRef
+ * @param {React.RefObject<HTMLVideoElement|HTMLCanvasElement>} options.frameSourceRef - nguồn frame: videoRef (webcam) hoặc canvasRef (Jetson)
  * @param {boolean} options.enabled - Bật/tắt detection loop
- * @param {boolean} options.cameraReady - Camera đã sẵn sàng chưa
+ * @param {boolean} options.cameraReady - Camera đã sẵn sàng chưa (chỉ dùng cho webcam)
  * @returns {{ modelState, modelProgress, detections, tracks, onResult }}
  */
-export function useYoloDetection({ videoRef, enabled, cameraReady }) {
+export function useYoloDetection({ frameSourceRef, enabled, cameraReady }) {
   // --- State public ---
   const [modelState, setModelState] = useState('idle')  // idle | loading | ready | error
   const [modelProgress, setModelProgress] = useState(0)
@@ -271,15 +271,15 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
   // Bước 6: Detection Loop (chạy liên tục khi enabled)
   // ============================================================
   useEffect(() => {
-    if (modelState !== 'ready' || !enabled || !cameraReady) {
+    // Nếu là webcam: cần cameraReady, nếu là Jetson: chỉ cần enabled
+    if (modelState !== 'ready' || !enabled || (frameSourceRef?.current?.tagName === 'VIDEO' && !cameraReady)) {
       loopActiveRef.current = false
       return
     }
 
     loopActiveRef.current = true
     let rafId = null
-    // Thêm biến ref để đo thời gian detect YOLO
-    const detectStartRef = { current: null }; /////
+    const detectStartRef = { current: null };
 
     const loop = async () => {
       if (!loopActiveRef.current) return
@@ -288,18 +288,21 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
       if (now - lastDetectTimeRef.current >= DETECTION_INTERVAL_MS) {
         lastDetectTimeRef.current = now
 
-        const videoEl = videoRef.current
-        if (videoEl && videoEl.readyState >= 2 && workCanvasRef.current) {
+        const sourceEl = frameSourceRef.current
+        // Nếu là video: kiểm tra readyState, nếu là canvas: luôn sẵn sàng
+        const isVideo = sourceEl && sourceEl.tagName === 'VIDEO'
+        const isCanvas = sourceEl && sourceEl.tagName === 'CANVAS'
+        if ((isVideo && sourceEl.readyState >= 2 && workCanvasRef.current) || (isCanvas && workCanvasRef.current)) {
           try {
-            detectStartRef.current = performance.now(); ////////
-            const dets = await detectFaces(videoEl, workCanvasRef.current)
-            const detectEnd = performance.now();//////
+            detectStartRef.current = performance.now();
+            const dets = await detectFaces(sourceEl, workCanvasRef.current)
+            const detectEnd = performance.now();
             console.log('[YOLO] detectFaces time:', (detectEnd - detectStartRef.current).toFixed(2), 'ms');
             if (dets.length > 0) {
               console.warn(`[detectFaces] ✓ ${dets.length} face(s) detected`)
             }
             setDetections(dets)
-            updateTracks(dets, videoEl)
+            updateTracks(dets, sourceEl)
           } catch (err) {
             console.error('[useYoloDetection] Detection error:', err)
           }
@@ -315,7 +318,7 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
       loopActiveRef.current = false
       if (rafId) cancelAnimationFrame(rafId)
     }
-  }, [modelState, enabled, cameraReady, videoRef, updateTracks])
+  }, [modelState, enabled, cameraReady, frameSourceRef, updateTracks])
 
   // ============================================================
   // Bước 7: Export trạng thái tracks để UI vẽ bounding box

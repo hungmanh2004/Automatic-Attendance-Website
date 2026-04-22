@@ -76,6 +76,20 @@ describe("GuestCheckinPage", () => {
     vi.restoreAllMocks();
   });
 
+  it("renders camera source selector and shows Jetson stream when selected", async () => {
+    renderGuestPage();
+    // Camera source selector should be present
+    expect(screen.getByLabelText(/nguồn camera/i)).toBeInTheDocument();
+
+    // Chọn Jetson Camera
+    fireEvent.change(screen.getByLabelText(/nguồn camera/i), { target: { value: "jetson" } });
+
+    // Kiểm tra có thẻ img hoặc video hiển thị luồng MJPEG
+    // (Tùy vào cách bạn render, ở đây kiểm tra <img> có src đúng)
+    expect(screen.getByAltText(/jetson camera stream/i)).toBeInTheDocument();
+    expect(screen.getByAltText(/jetson camera stream/i).src).toMatch(/\/jetson\/stream/);
+  });
+
   it("renders the guest check-in camera page", () => {
     const { container } = renderGuestPage();
 

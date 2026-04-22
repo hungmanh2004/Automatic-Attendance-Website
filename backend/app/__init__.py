@@ -122,9 +122,12 @@ def create_app(test_config=None):
     Session(app)
     _initialize_database(app)
     _initialize_services(app)
+
+    from .routes.jetson_stream import jetson_stream_bp
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(guest_bp, url_prefix="/api")
     app.register_blueprint(manager_bp, url_prefix="/api")
     app.register_blueprint(face_enrollment_bp, url_prefix="/api")
+    app.register_blueprint(jetson_stream_bp)  
 
     return app

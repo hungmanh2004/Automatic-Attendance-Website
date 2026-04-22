@@ -66,6 +66,10 @@ function getHistoryBadge(entry) {
 }
 
 export default function GuestCheckinPage() {
+  // Thêm state để force reload luồng Jetson khi chuyển nguồn
+  const [jetsonStreamKey, setJetsonStreamKey] = useState(Date.now());
+  // Thêm state chọn nguồn camera
+  const [cameraSource, setCameraSource] = useState("webcam"); // "webcam" | "jetson"
   const {
     videoRef,
     cameraState,
@@ -86,7 +90,8 @@ export default function GuestCheckinPage() {
   const overlayRafRef = useRef(null);
   const lastCheckinRef = useRef({ employeeId: null, timestamp: 0 });
 
-  const cameraReady = cameraState === "ready";
+  // Chỉ coi là ready nếu đang chọn webcam
+  const cameraReady = cameraState === "ready" && cameraSource === "webcam";
   const copy = useMemo(() => getGuestResultCopy(result), [result]);
 
   // ── YOLO ONNX Hook — quét liên tục từ khi mở trang ──
@@ -200,6 +205,16 @@ export default function GuestCheckinPage() {
     };
   }, [cameraReady, modelState, drawOverlay]);
 
+  // Ngắt webcam khi chuyển sang Jetson
+  useEffect(() => {
+    if (cameraSource === "jetson") {
+      stopCamera();
+      // Force reload Jetson stream by changing key
+      setJetsonStreamKey(Date.now());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraSource]);
+
   useEffect(() => () => stopCamera(), [stopCamera]);
 
   useEffect(() => {
@@ -286,49 +301,64 @@ export default function GuestCheckinPage() {
       <section className="kiosk-grid">
         <div className="kiosk-camera-panel panel-dark">
           <div className="kiosk-camera-stage">
-            <video ref={videoRef} className="kiosk-video kiosk-video--mirrored" autoPlay playsInline muted />
-            <canvas
-              ref={overlayCanvasRef}
-              className="kiosk-detection-canvas"
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                pointerEvents: 'none',
-              }}
-            />
-            {modelState === 'loading' ? (
-              <div className="overlay-message" style={{ zIndex: 20 }}>
-                <strong>Đang nạp AI Nhận Diện...</strong>
-                <div style={{ width: '80%', height: 6, background: 'rgba(255,255,255,0.15)', borderRadius: 3, margin: '12px auto' }}>
-                  <div style={{ width: `${modelProgress}%`, height: '100%', background: '#00e5ff', borderRadius: 3, transition: 'width 0.3s' }} />
-                </div>
-                <p style={{ fontSize: '0.85rem', opacity: 0.7 }}>{modelProgress}% — Tải model YOLOv12 ({'>'}10MB)</p>
-              </div>
-            ) : null}
-            {modelState === 'error' ? (
-              <div className="overlay-message" style={{ zIndex: 20 }}>
-                <strong>Lỗi nạp AI</strong>
-                <p>Không tải được model ONNX.</p>
-              </div>
-            ) : null}
-            {!cameraReady ? (
-              <div className={`kiosk-overlay is-error`}>
-                <div className="overlay-status">
-                  <span className="scan-dot" />
-                  {getStatusLabel(cameraState)}
-                </div>
-                <div className="overlay-message">
-                  <strong>Lỗi camera</strong>
-                  <p>{cameraError || "Không kết nối được camera."}</p>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={retryCamera}>
-                    Thử lại camera
-                  </button>
-                </div>
-              </div>
-            ) : null}
+            {/* Camera source selector */}
+            {cameraSource === "webcam" ? (
+              <>
+                <video ref={videoRef} className="kiosk-video kiosk-video--mirrored" autoPlay playsInline muted />
+                <canvas
+                  ref={overlayCanvasRef}
+                  className="kiosk-detection-canvas"
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    pointerEvents: 'none',
+                  }}
+                />
+                {modelState === 'loading' ? (
+                  <div className="overlay-message" style={{ zIndex: 20 }}>
+                    <strong>Đang nạp AI Nhận Diện...</strong>
+                    <div style={{ width: '80%', height: 6, background: 'rgba(255,255,255,0.15)', borderRadius: 3, margin: '12px auto' }}>
+                      <div style={{ width: `${modelProgress}%`, height: '100%', background: '#00e5ff', borderRadius: 3, transition: 'width 0.3s' }} />
+                    </div>
+                    <p style={{ fontSize: '0.85rem', opacity: 0.7 }}>{modelProgress}% — Tải model YOLOv12 ({'>'}10MB)</p>
+                  </div>
+                ) : null}
+                {modelState === 'error' ? (
+                  <div className="overlay-message" style={{ zIndex: 20 }}>
+                    <strong>Lỗi nạp AI</strong>
+                    <p>Không tải được model ONNX.</p>
+                  </div>
+                ) : null}
+                {!cameraReady ? (
+                  <div className={`kiosk-overlay is-error`}>
+                    <div className="overlay-status">
+                      <span className="scan-dot" />
+                      {getStatusLabel(cameraState)}
+                    </div>
+                    <div className="overlay-message">
+                      <strong>Lỗi camera</strong>
+                      <p>{cameraError || "Không kết nối được camera."}</p>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={retryCamera}>
+                        Thử lại camera
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <>
+                {/* Jetson Camera MJPEG stream */}
+                <img
+                  key={jetsonStreamKey}
+                  src="http://localhost:5000/jetson/stream"
+                  alt="Jetson camera stream"
+                  style={{ width: '100%', maxHeight: 400, objectFit: 'contain', background: '#000' }}
+                />
+              </>
+            )}
           </div>
 
           <div className="kiosk-toolbar">
@@ -338,9 +368,24 @@ export default function GuestCheckinPage() {
             </div>
 
             <div className="kiosk-toolbar-actions">
-              {cameraDevices.length > 0 ? (
+              <label className="kiosk-camera-select" htmlFor="camera-source-select">
+                <span className="text-muted">Nguồn camera</span>
+                <select
+                  id="camera-source-select"
+                  aria-label="Nguồn camera"
+                  value={cameraSource}
+                  onChange={e => setCameraSource(e.target.value)}
+                  style={{ marginLeft: 8, marginRight: 8 }}
+                  disabled={submissionState === "loading"}
+                >
+                  <option value="webcam">Webcam</option>
+                  <option value="jetson">Jetson Camera</option>
+                </select>
+              </label>
+              {/* Nếu là webcam thì cho phép chọn thiết bị cụ thể */}
+              {cameraSource === "webcam" && cameraDevices.length > 0 ? (
                 <label className="kiosk-camera-select" htmlFor="camera-device-select">
-                  <span className="text-muted">Nguồn camera</span>
+                  <span className="text-muted">Thiết bị</span>
                   <select
                     id="camera-device-select"
                     value={selectedCameraId || cameraDevices[0].deviceId}
