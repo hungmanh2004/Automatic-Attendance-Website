@@ -51,30 +51,31 @@ class RecognitionService:
         """
         import time
         t0 = time.perf_counter()
-        embedding = self.embedding_service.extract_embeddings_from_crop(
+
+        embedding, embed_timing = self.embedding_service.extract_embeddings_from_crop(
             crop_bytes, keypoints_list
-        )
-        t1 = time.perf_counter()
-        import logging
-        logging.getLogger(__name__).info(
-            "[TIMING] extract_embeddings: %.1fms", (t1 - t0) * 1000
         )
 
         if embedding is None:
-            return {"status": "no_face"}
+            return {"status": "no_face", "_timing": embed_timing}
 
         t2 = time.perf_counter()
         match = self.face_index_service.find_match(embedding)
         t3 = time.perf_counter()
-        logging.getLogger(__name__).info(
-            "[TIMING] find_match (Redis KNN): %.1fms", (t3 - t2) * 1000
-        )
+        knn_ms = round((t3 - t2) * 1000, 1)
+
         if match is None:
-            return {"status": "unknown"}
+            return {
+                "status": "unknown",
+                "_timing": {**embed_timing, "knn_ms": knn_ms},
+            }
 
         existing_event = self.attendance_service.get_today_event(match["employee_id"])
         if existing_event is not None:
-            return self._build_response(existing_event, match, created=False)
+            total_ms = round((time.perf_counter() - t0) * 1000, 1)
+            resp = self._build_response(existing_event, match, created=False)
+            resp["_timing"] = {**embed_timing, "knn_ms": knn_ms, "total_ms": total_ms}
+            return resp
 
         snapshot_path = self.storage_service.save_guest_frame(
             crop_bytes, filename=filename
@@ -87,14 +88,21 @@ class RecognitionService:
             skip_existing_lookup=True,
         )
         t5 = time.perf_counter()
+        db_ms = round((t5 - t4) * 1000, 1)
+        total_ms = round((t5 - t0) * 1000, 1)
+
+        import logging
         logging.getLogger(__name__).info(
-            "[TIMING] DB write (attendance): %.1fms | GRAND TOTAL: %.1fms",
-            (t5 - t4) * 1000, (t5 - t0) * 1000
+            "[TIMING] embed=%.1fms knn=%.1fms db=%.1fms TOTAL=%.1fms",
+            embed_timing.get("embed_total_ms", 0), knn_ms, db_ms, total_ms,
         )
+
         if not created:
             _cleanup_orphan_snapshot(snapshot_path, event.snapshot_path)
 
-        return self._build_response(event, match, created)
+        resp = self._build_response(event, match, created)
+        resp["_timing"] = {**embed_timing, "knn_ms": knn_ms, "db_ms": db_ms, "total_ms": total_ms}
+        return resp
 
 
 def _cleanup_orphan_snapshot(snapshot_path, persisted_snapshot_path):

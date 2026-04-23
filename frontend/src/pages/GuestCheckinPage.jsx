@@ -65,6 +65,40 @@ function getHistoryBadge(entry) {
   return "badge-error";
 }
 
+function PerfHud({ getPerfSnapshot }) {
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (!containerRef.current || !getPerfSnapshot) return;
+      const p = getPerfSnapshot();
+      const d = p.detect || {};
+      const b = p.backend || {};
+      const lines = [
+        `YOLO Detect   : ${d.total_ms ?? '—'}ms`,
+        `  Preprocess  : ${d.preprocess_ms ?? '—'}ms`,
+        `  Inference   : ${d.inference_ms ?? '—'}ms`,
+        `  NMS         : ${d.postprocess_ms ?? '—'}ms`,
+        `Crop+Encode   : ${p.crop ?? '—'}ms`,
+        `Network (API) : ${p.network ?? '—'}ms`,
+        `  Backend     : ${b.total_ms ?? '—'}ms`,
+        `    Align     : ${b.align_ms ?? '—'}ms`,
+        `    ArcFace   : ${b.get_feat_ms ?? '—'}ms`,
+        `    KNN       : ${b.knn_ms ?? '—'}ms`,
+        `    DB Write  : ${b.db_ms ?? '—'}ms`,
+      ];
+      containerRef.current.textContent = lines.join('\n');
+    }, 500);
+    return () => clearInterval(iv);
+  }, [getPerfSnapshot]);
+
+  return (
+    <pre ref={containerRef} className="perf-hud">
+      Loading...
+    </pre>
+  );
+}
+
 export default function GuestCheckinPage() {
   const {
     videoRef,
@@ -95,11 +129,26 @@ export default function GuestCheckinPage() {
     modelProgress,
     lastResult: yoloResult,
     getTracksSnapshot,
+    getPerfSnapshot,
   } = useYoloDetection({
     videoRef,
     enabled: cameraReady,
     cameraReady,
   });
+
+  // ── Performance HUD (bật/tắt bằng phím P) ──
+  const [showPerfHud, setShowPerfHud] = useState(false);
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'p' || e.key === 'P') {
+        // Ignore if user is typing in an input/select
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+        setShowPerfHud((v) => !v);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // Khi backend trả kết quả nhận diện từ YOLO hook
   useEffect(() => {
@@ -333,6 +382,15 @@ export default function GuestCheckinPage() {
                 </div>
               </div>
             ) : null}
+            {showPerfHud ? <PerfHud getPerfSnapshot={getPerfSnapshot} /> : null}
+            <button
+              type="button"
+              className="perf-hud-toggle"
+              onClick={() => setShowPerfHud((v) => !v)}
+              title="Bật/tắt Performance HUD (phím P)"
+            >
+              ⚡
+            </button>
           </div>
 
           <div className="kiosk-toolbar">

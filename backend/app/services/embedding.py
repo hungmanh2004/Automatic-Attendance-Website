@@ -263,42 +263,29 @@ class EmbeddingService:
     # (YOLO ONNX chạy trên browser, backend chỉ align + embed)
     # ------------------------------------------------------------------
     def extract_embeddings_from_crop(self, crop_bytes, keypoints_list):
-        import time
-        t0 = time.perf_counter()
-        """Nhận ảnh crop đã khoét sẵn + danh sách 5 keypoints, trả về 1 embedding.
-
-        Frontend đã chạy YOLO ONNX trên browser để:
-          1. Tìm bounding box khuôn mặt
-          2. Cắt crop (có padding ~30-50%)
-          3. Trích xuất 5 keypoints (re-mapped về tọa độ local của crop)
-
-        Backend chỉ cần:
-          1. align_face() dựa trên keypoints local
-          2. InsightFace get_feat() để sinh embedding vector
-
-        Args:
-            crop_bytes: raw bytes của ảnh crop (JPEG/PNG).
-            keypoints_list: list 10 số [x0,y0, x1,y1, ..., x4,y4]
-                            tương ứng 5 điểm: mắt_trái, mắt_phải,
-                            mũi, mép_trái, mép_phải – **tọa độ local
-                            trong crop** (frontend đã trừ offset).
+        """Nhận ảnh crop đã khoét sẵn + danh sách 5 keypoints, trả về embedding + timing.
 
         Returns:
-            list[float] | None: embedding vector, hoặc None nếu thất bại.
+            tuple(list[float] | None, dict): (embedding, timing_dict).
+            timing_dict luôn được trả về kể cả khi embedding là None.
         """
+        import time
+        t0 = time.perf_counter()
+        timing = {}
+
         # Decode crop bytes → numpy BGR image
         arr = np.frombuffer(crop_bytes, dtype=np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img is None:
             logger.warning("extract_embeddings_from_crop: cannot decode crop image")
-            return None
+            return None, timing
         t1 = time.perf_counter()
-        logger.info("[TIMING] decode: %.1fms", (t1 - t0) * 1000)
+        timing["decode_ms"] = round((t1 - t0) * 1000, 1)
 
         h, w = img.shape[:2]
         if h < 20 or w < 20:
             logger.warning("extract_embeddings_from_crop: crop too small (%dx%d)", w, h)
-            return None
+            return None, timing
 
         # Parse keypoints: [x0,y0, x1,y1, ... x4,y4] → numpy (5,2)
         kps = None
@@ -317,13 +304,13 @@ class EmbeddingService:
         t2 = time.perf_counter()
         aligned_face = align_face(img, kps, box)
         t3 = time.perf_counter()
-        logger.info("[TIMING] align_face: %.1fms", (t3 - t2) * 1000)
+        timing["align_ms"] = round((t3 - t2) * 1000, 1)
 
         if aligned_face is None or aligned_face.size == 0:
             logger.warning("extract_embeddings_from_crop: alignment produced empty result")
-            return None
+            return None, timing
 
-        # Bước 2: Resize về 112x112 chuẩn InsightFace
+        # Bước 2: Resize về 112x112 chuẩn InsightFace + extract embedding
         try:
             face_for_recognition = cv2.resize(
                 aligned_face, (112, 112), interpolation=cv2.INTER_AREA
@@ -333,18 +320,23 @@ class EmbeddingService:
             t5 = time.perf_counter()
             vector = recognizer.get_feat(face_for_recognition)
             t6 = time.perf_counter()
+            timing["get_feat_ms"] = round((t6 - t5) * 1000, 1)
+            timing["embed_total_ms"] = round((t6 - t0) * 1000, 1)
+
             logger.info(
-                "[TIMING] recognizer.prepare: %.1fms | get_feat: %.1fms | TOTAL: %.1fms",
-                (t5 - t4) * 1000, (t6 - t5) * 1000, (t6 - t0) * 1000
+                "[TIMING] decode=%.1fms align=%.1fms get_feat=%.1fms TOTAL=%.1fms",
+                timing["decode_ms"], timing["align_ms"], timing["get_feat_ms"],
+                timing["embed_total_ms"],
             )
+
             if vector is None:
-                return None
+                return None, timing
 
             vector_np = np.asarray(vector, dtype=np.float32)
             if vector_np.ndim > 1:
                 vector_np = vector_np[0]
 
-            return vector_np.reshape(-1).tolist()
+            return vector_np.reshape(-1).tolist(), timing
         except Exception:
             logger.warning("extract_embeddings_from_crop: InsightFace failed", exc_info=True)
-            return None
+            return None, timing

@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  computeIoU,
   cropFace,
   detectFaces,
   isModelLoaded,
@@ -27,7 +28,7 @@ const MIN_FACE_AREA_RATIO = 0.025 // Cho phép mặt nhỏ hơn một chút đ�
 const MIN_CONFIDENCE = 0.4        // Nới ngưỡng confidence để nhận diện sớm hơn
 const COOLDOWN_MS = 1500          // Giảm thời gian chờ giữa các lần nhận diện
 const MAX_RETRIES = 3             // Số lần thử lại cho unknown
-const TRACK_LOST_FRAMES = 30      // Giữ track lâu hơn để task async kịp trả kết quả
+const TRACK_LOST_FRAMES = 5       // Xóa ghost track nhanh (0.5s), tránh bbox chồng chéo
 const DETECTION_INTERVAL_MS = 100 // Chạy detect mỗi 100ms (~10fps YOLO)
 const DEBUG_DETECTION = false
 
@@ -64,6 +65,7 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
   const nextTrackIdRef = useRef(1)
   const loopActiveRef = useRef(false)
   const lastDetectTimeRef = useRef(0)
+  const perfRef = useRef({ detect: null, crop: null, network: null, backend: null })
 
   // ============================================================
   // Bước 1: Load model ONNX khi component mount
@@ -150,23 +152,31 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
     track.state = 'recognizing'
 
     try {
+      const tCrop0 = performance.now()
       const cropResult = await cropFace(videoEl, detection, 0.4)
+      const tCrop1 = performance.now()
+      perfRef.current.crop = Math.round((tCrop1 - tCrop0) * 10) / 10
+
       if (!cropResult) {
         track.inflight = false
         track.state = 'detecting'
         return
       }
 
+      const tNet0 = performance.now()
       const payload = await submitGuestCheckinKpts(
         cropResult.blob,
         cropResult.localKeypoints,
       )
+      let finalPayload = payload
       if (payload?.status === 'queued' && payload?.task_id) {
-        const resolvedPayload = await waitGuestCheckinTaskResult(payload.task_id)
-        handleRecognitionResult(trackId, resolvedPayload)
-      } else {
-        handleRecognitionResult(trackId, payload)
+        finalPayload = await waitGuestCheckinTaskResult(payload.task_id)
       }
+      const tNet1 = performance.now()
+      perfRef.current.network = Math.round((tNet1 - tNet0) * 10) / 10
+      perfRef.current.backend = finalPayload?._timing || null
+
+      handleRecognitionResult(trackId, finalPayload)
     } catch (error) {
       handleRecognitionResult(trackId, {
         status: 'network_error',
@@ -190,6 +200,28 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
       track.matched = false
     }
 
+    // Helper: kiểm tra nếu detection mới "trông giống người khác" so với track cũ
+    // Dùng khi track đã recognized — phát hiện swap người mà không có gap frame
+    const looksLikeDifferentPerson = (track, newBox) => {
+      if (track.state !== 'recognized') return false
+      const dist = centroidDistance(newBox, track.lastBox)
+      // Tâm bbox nhảy >8% chiều rộng video → quá xa cho cùng 1 người trong 100ms
+      if (dist > vw * 0.08) return true
+      // Kích thước bbox thay đổi >60% → mặt mới to/nhỏ hơn hẳn
+      const oldArea = (track.lastBox.x2 - track.lastBox.x1) * (track.lastBox.y2 - track.lastBox.y1)
+      const newArea = (newBox.x2 - newBox.x1) * (newBox.y2 - newBox.y1)
+      if (oldArea > 0 && Math.abs(newArea - oldArea) / oldArea > 0.6) return true
+      return false
+    }
+
+    const resetTrackIdentity = (track) => {
+      track.state = 'detecting'
+      track.result = null
+      track.retries = 0
+      track.inflight = false
+      track.stableFrames = 0
+    }
+
     // Gán detection → track gần nhất (Centroid matching)
     for (const det of newDetections) {
       let bestTrackId = null
@@ -204,30 +236,58 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
         }
       }
 
-      // Ngưỡng: nếu centroid quá xa (>25% chiều rộng video) → track mới
+      // Ngưỡng: nếu centroid quá xa (>25% chiều rộng video) → kiểm tra thêm IoU
       const maxDist = vw * 0.25
       if (bestTrackId !== null && bestDist < maxDist) {
         const track = tracks.get(bestTrackId)
+        // Reset nếu track mất match trước đó HOẶC trông giống người khác
+        if ((track.missedFrames > 0 && track.state === 'recognized') ||
+            looksLikeDifferentPerson(track, det.box)) {
+          resetTrackIdentity(track)
+        }
         track.matched = true
         track.lastBox = det.box
         track.lastDetection = det
         track.missedFrames = 0
         track.stableFrames += 1
       } else {
-        // Tạo track mới
-        const newId = nextTrackIdRef.current++
-        tracks.set(newId, {
-          lastBox: det.box,
-          lastDetection: det,
-          state: 'detecting',   // detecting → recognizing → recognized/unknown
-          stableFrames: 1,
-          missedFrames: 0,
-          retries: 0,
-          inflight: false,
-          result: null,
-          cooldownUntil: 0,
-          matched: true,
-        })
+        // Fallback: kiểm tra IoU trước khi tạo track mới
+        let iouMatchId = null
+        for (const [id, track] of tracks.entries()) {
+          if (track.matched) continue
+          if (computeIoU(det.box, track.lastBox) > 0.3) {
+            iouMatchId = id
+            break
+          }
+        }
+
+        if (iouMatchId !== null) {
+          const track = tracks.get(iouMatchId)
+          if ((track.missedFrames > 0 && track.state === 'recognized') ||
+              looksLikeDifferentPerson(track, det.box)) {
+            resetTrackIdentity(track)
+          }
+          track.matched = true
+          track.lastBox = det.box
+          track.lastDetection = det
+          track.missedFrames = 0
+          track.stableFrames += 1
+        } else {
+          // Thực sự là mặt mới → tạo track mới
+          const newId = nextTrackIdRef.current++
+          tracks.set(newId, {
+            lastBox: det.box,
+            lastDetection: det,
+            state: 'detecting',
+            stableFrames: 1,
+            missedFrames: 0,
+            retries: 0,
+            inflight: false,
+            result: null,
+            cooldownUntil: 0,
+            matched: true,
+          })
+        }
       }
     }
 
@@ -308,7 +368,8 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
         const videoEl = videoRef.current
         if (videoEl && videoEl.readyState >= 2 && workCanvasRef.current) {
           try {
-            const dets = await detectFaces(videoEl, workCanvasRef.current)
+            const { detections: dets, timing: detectTiming } = await detectFaces(videoEl, workCanvasRef.current)
+            if (detectTiming) perfRef.current.detect = detectTiming
             if (DEBUG_DETECTION && dets.length > 0) {
               console.warn(`[detectFaces] ✓ ${dets.length} face(s) detected`)
             }
@@ -337,6 +398,8 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
   const getTracksSnapshot = useCallback(() => {
     const result = []
     for (const [id, track] of tracksRef.current.entries()) {
+      // Ẩn ghost track đã mất match — tránh bbox chồng chéo
+      if (track.missedFrames > 0) continue
       result.push({
         id,
         box: track.lastBox,
@@ -354,11 +417,17 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
     return result
   }, [])
 
+  // ============================================================
+  // Bước 8: Export performance metrics cho HUD
+  // ============================================================
+  const getPerfSnapshot = useCallback(() => ({ ...perfRef.current }), [])
+
   return {
     modelState,
     modelProgress,
     detections,
     lastResult,
     getTracksSnapshot,
+    getPerfSnapshot,
   }
 }

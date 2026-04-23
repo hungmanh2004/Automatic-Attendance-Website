@@ -77,7 +77,7 @@ export async function loadModel(onProgress) {
       if (onProgress) onProgress(85)
 
       _session = await ort.InferenceSession.create(modelBuffer.buffer, {
-        executionProviders: ['wasm'],
+        executionProviders: ['webgl', 'wasm'],
         graphOptimizationLevel: 'all',
       })
 
@@ -167,13 +167,16 @@ export function preprocessFrame(videoEl, workCanvas) {
  * @returns {Promise<Array<{box: {x1,y1,x2,y2}, score: number, keypoints: number[][]}>>}
  */
 export async function detectFaces(videoEl, workCanvas) {
-  if (!_session) return []
+  if (!_session) return { detections: [], timing: null }
 
+  const t0 = performance.now()
   const { tensor, scale, padX, padY } = preprocessFrame(videoEl, workCanvas)
+  const t1 = performance.now()
 
   // Chạy model
   const inputName = _session.inputNames[0]
   const results = await _session.run({ [inputName]: tensor })
+  const t2 = performance.now()
 
   // Output tensor: shape [1, numFeatures, numDetections]
   // numFeatures = 4 (box: cx,cy,w,h) + 1 (score) + numKeypoints*3 (x,y,conf)
@@ -229,11 +232,21 @@ export async function detectFaces(videoEl, workCanvas) {
   }
 
   // NMS: loại bỏ các box trùng lặp
-  const result = nms(candidates, IOU_THRESHOLD)
-  if (DEBUG_YOLO && result.length > 0) {
-    console.info(`[YOLO] raw=${candidates.length} → nms=${result.length} | first box: x1=${result[0].box.x1.toFixed(0)} y1=${result[0].box.y1.toFixed(0)} score=${result[0].score.toFixed(3)}`)
+  const detections = nms(candidates, IOU_THRESHOLD)
+  const t3 = performance.now()
+
+  if (DEBUG_YOLO && detections.length > 0) {
+    console.info(`[YOLO] raw=${candidates.length} → nms=${detections.length} | first box: x1=${detections[0].box.x1.toFixed(0)} y1=${detections[0].box.y1.toFixed(0)} score=${detections[0].score.toFixed(3)}`)
   }
-  return result
+
+  const timing = {
+    preprocess_ms: Math.round((t1 - t0) * 10) / 10,
+    inference_ms: Math.round((t2 - t1) * 10) / 10,
+    postprocess_ms: Math.round((t3 - t2) * 10) / 10,
+    total_ms: Math.round((t3 - t0) * 10) / 10,
+  }
+
+  return { detections, timing }
 }
 
 // ============================================================
@@ -280,7 +293,7 @@ function nms(detections, iouThreshold) {
 /**
  * Tính IoU (Intersection over Union) giữa 2 box.
  */
-function computeIoU(a, b) {
+export function computeIoU(a, b) {
   const x1 = Math.max(a.x1, b.x1)
   const y1 = Math.max(a.y1, b.y1)
   const x2 = Math.min(a.x2, b.x2)
@@ -328,32 +341,48 @@ export async function cropFace(videoEl, detection, paddingRatio = 0.4) {
 
   if (cropW < 20 || cropH < 20) return null
 
-  // Vẽ vùng crop lên canvas tạm
-  const canvas = document.createElement('canvas')
-  canvas.width = cropW
-  canvas.height = cropH
-  const ctx = canvas.getContext('2d')
-  ctx.translate(cropW, 0)
-  ctx.scale(-1, 1)
-  ctx.drawImage(videoEl, cropX1, cropY1, cropW, cropH, 0, 0, cropW, cropH)
+  // Scale xuống max 256px — InsightFace chỉ cần 112×112
+  // Giảm pixel data ~10-20x → toBlob nhanh hơn rất nhiều
+  const MAX_DIM = 256
+  const scale = Math.min(1, MAX_DIM / Math.max(cropW, cropH))
+  const outW = Math.round(cropW * scale)
+  const outH = Math.round(cropH * scale)
 
-  // Re-map keypoints về tọa độ local (trong crop)
+  // Vẽ vùng crop lên canvas đã scale sẵn
+  const canvas = document.createElement('canvas')
+  canvas.width = outW
+  canvas.height = outH
+  const ctx = canvas.getContext('2d')
+  // Mirror theo chiều ngang (camera bị lật)
+  ctx.translate(outW, 0)
+  ctx.scale(-1, 1)
+  ctx.drawImage(videoEl, cropX1, cropY1, cropW, cropH, 0, 0, outW, outH)
+
+  // Re-map keypoints về tọa độ local (trong crop đã scale + mirror)
   // Format flat: [x0,y0, x1,y1, x2,y2, x3,y3, x4,y4]
   const localKeypoints = []
   if (keypoints) {
     for (const [kx, ky] of keypoints) {
-      const localX = Math.round(kx - cropX1)
+      const localX = Math.round((kx - cropX1) * scale)
       localKeypoints.push(
-        cropW - localX,
-        Math.round(ky - cropY1),
+        outW - localX,            // mirror x
+        Math.round((ky - cropY1) * scale),
       )
     }
   }
 
-  // Chuyển canvas → JPEG blob
-  const blob = await new Promise((resolve) => {
-    canvas.toBlob(resolve, 'image/jpeg', 0.85)
-  })
+  // Chuyển canvas → JPEG blob (synchronous — tránh toBlob callback bị treo)
+  // toBlob dùng callback queue bị starved bởi detection loop → delay 3-4s
+  // toDataURL synchronous + manual convert chỉ mất vài ms cho 256×256
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.80)
+  const byteString = atob(dataUrl.split(',')[1])
+  const ab = new ArrayBuffer(byteString.length)
+  const ia = new Uint8Array(ab)
+  for (let i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i)
+  }
+  const blob = new Blob([ab], { type: 'image/jpeg' })
 
   return { blob, localKeypoints, canvas }
 }
+

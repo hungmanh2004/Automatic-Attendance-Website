@@ -105,7 +105,14 @@ class FaceBatchEnrollmentService:
         # Prefer crop-only embedding path to skip backend YOLO detection per frame.
         crop_extractor = getattr(self.embedding_service, "extract_embeddings_from_crop", None)
         if callable(crop_extractor):
-            vector = crop_extractor(frame_bytes, None)
+            result = crop_extractor(frame_bytes, None)
+            if result is None:
+                return []
+            # extract_embeddings_from_crop trả tuple (embedding, timing_dict)
+            if isinstance(result, tuple):
+                vector = result[0]
+            else:
+                vector = result
             if vector is None:
                 return []
             return [vector]

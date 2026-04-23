@@ -98,13 +98,15 @@ def guest_checkin_kpts():
     if error_response is not None:
         return error_response
 
-    celery_app = current_app.extensions["celery"]
-    task = celery_app.tasks["guest.process_crop_checkin"].delay(
-        crop_b64=base64.b64encode(crop_bytes).decode("ascii"),
-        keypoints_list=keypoints_list,
+    # Xử lý đồng bộ — bỏ Celery queue để giảm ~5s overhead
+    # (queue latency + base64 serialize + polling round-trips)
+    recognition_service = current_app.extensions["recognition_service"]
+    payload = recognition_service.process_crop_image(
+        crop_bytes,
+        keypoints_list,
         filename=filename,
     )
-    return jsonify({"status": "queued", "task_id": task.id}), 202
+    return jsonify(payload)
 
 
 @guest_bp.get("/guest/checkin-kpts/tasks/<task_id>")

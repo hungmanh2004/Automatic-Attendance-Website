@@ -262,7 +262,8 @@ export function useFaceRegistration(employeeId, { onUnauthenticated } = {}) {
     let detections = [];
 
     try {
-      detections = await detectFaces(videoElement, workCanvasRef.current);
+      const detectResult = await detectFaces(videoElement, workCanvasRef.current);
+      detections = detectResult.detections || detectResult;
     } catch (error) {
       console.error("[FaceRegistration] detectFaces failed:", error);
       setLiveFeedback(
