@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useRef } from "react";
 
-const JETSON_STREAM_URL = "/jetson/stream";
+export const JETSON_STREAM_URL = "/jetson/stream";
 
 // ── JetsonStream ─────────────────────────────────────────────────────────────
 // Tách thành component riêng + React.memo để MJPEG <img> không bị remount
 // mỗi khi parent re-render. Khi Jetson không kết nối được, browser sẽ retry
 // liên tục gây broken-image flicker — onError dùng exponential backoff để
 // giảm tần suất retry thay vì để browser tự retry ngay lập tức.
-const JetsonStream = React.memo(function JetsonStream({ streamUrl }) {
+const JetsonStream = React.memo(function JetsonStream({ streamUrl, onFrame }) {
   const url = streamUrl || JETSON_STREAM_URL;
   const imgRef = useRef(null);
   const retryTimer = useRef(null);
@@ -30,7 +30,15 @@ const JetsonStream = React.memo(function JetsonStream({ streamUrl }) {
       clearTimeout(retryTimer.current);
       retryTimer.current = null;
     }
-  }, []);
+    console.debug("[JetsonStream] image loaded", {
+      url,
+      naturalWidth: imgRef.current?.naturalWidth,
+      naturalHeight: imgRef.current?.naturalHeight,
+    });
+    if (onFrame && imgRef.current) {
+      try { onFrame(imgRef.current) } catch (e) { /* swallow */ }
+    }
+  }, [onFrame]);
 
   useEffect(() => {
     return () => {
